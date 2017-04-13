@@ -1,0 +1,7 @@
+#!/bin/bash
+
+make
+cp ../testcase/iimage.bin .
+cp ../testcase/dimage.bin .
+./pipeline
+
