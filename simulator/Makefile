@@ -1,5 +1,5 @@
 CC = g++
-CFLAGS = -std=c++11 -O3 -Wall
+CFLAGS = -std=c++11 -O3 
 
 main: pipeline.cpp
 	$(CC) $(CFLAGS) pipeline.cpp -o pipeline
