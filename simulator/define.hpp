@@ -70,15 +70,24 @@
 	
 // IF/ID
 	int IFID_NPC;
+	int IFID_PC_input1;
+	int IFID_PC_input2;
 	int IFID_Instruction_code;
+	int IFID_Flush;
+	int IFID_Stall;
+	int PCSel;
 // ID/EX
+	int IDEX_PC;
 	int IDEX_Register_Result[2];
 	int IDEX_Signed_extend;
 	int IDEX_Register_Rs;
 	int IDEX_Register_Rt1;
 	int IDEX_Register_Rt2;
+	int IDEX_Register_RtB;
 	int IDEX_Register_Rd;
-	// int IDEX_ExtOp;   ???????
+	int IDEX_Flush;
+	int IDEX_Stall;
+	// int IDEX_ExtOp;
 	int IDEX_ALUSrc;
 	int IDEX_ALUOp;
 	int IDEX_RegDst;
@@ -87,6 +96,7 @@
 	int IDEX_MemtoReg;
 	int IDEX_RegWr;
 // EX/MEM
+	int EXMEM_Flush;
 	int EXMEM_MemW;
 	int EXMEM_Branch;
 	int EXMEM_MemtoReg;
@@ -106,6 +116,8 @@
 	int ALU_shift;
 	int ALU_input1;
 	int ALU_input2;
+	int reg_output_equal;
+	
 // Instruction decoder
 	int opcode;
 	int r2521;
