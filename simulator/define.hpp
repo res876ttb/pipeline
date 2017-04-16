@@ -2,21 +2,50 @@
 #define log
 #define debug
 
-// define ALUop
-#define ADD 				11
-#define ADDU				12
-#define SUB					21
-#define MULT 				31
-#define MULTU 				32
-#define AND 				41
-#define OR 					51
-#define NAND 				61
-#define NOR 				71
-#define XOR 				81
-#define SHIFT_LEFT 			91
-#define SHIFT_RIGHT 		101
-#define SHIFT_RIGHT_ARITH 	102
-
+// define ALUop and decoder
+#define SHIFT_LEFT 			0x00
+#define SHIFT_RIGHT 		0x02
+#define SHIFT_RIGHT_ARITH 	0x03
+#define nothing             123456789
+#define COMPARE 			100000
+#define ADD 	0x20
+#define ADDU 	0x21
+#define SUB 	0x22
+#define AND  	0x24
+#define OR 		0x25
+#define XOR 	0x26
+#define NOR 	0x27
+#define NAND 	0x28
+#define SLT 	0x2A
+#define SLL 	0x00
+#define SRL 	0x02
+#define SRA 	0x03
+#define JR 		0x08
+#define MULT 	0x18
+#define MULTU 	0x19
+#define MFHI 	0x10
+#define MFLO 	0x12
+#define ADDI 	0x08
+#define ADDIU 	0x09
+#define LW 		0x23
+#define LH 		0x21
+#define LHU 	0x25
+#define LB 		0x20
+#define LBU 	0x24
+#define SW 		0x2B
+#define SH 		0x29
+#define SB 		0x28
+#define LUI 	0x0F
+#define ANDI 	0x0C
+#define ORI 	0x0D
+#define NORI 	0x0E
+#define SLTI 	0x0A
+#define BEQ 	0x04
+#define BNE 	0x05
+#define BGTZ 	0x07
+#define J 		0x02
+#define JAL		0x03
+#define HALT	0x3F
 
 // variable definition
 	FILE *fout, *ferr;
@@ -31,11 +60,13 @@
 	int command;
 	
 // Error detection
-	bool errorflag_write0=false;
-	bool errorflag_overflow=false;
-	bool errorflag_overwrite=false;
-	bool errorflag_memoryOverflow=false;
-	bool errorflag_missingAlign=false;
+	bool errorflag_write0 = false;
+	bool errorflag_overflow = false;
+	bool errorflag_overwrite = false;
+	bool errorflag_memoryOverflow = false;
+	bool errorflag_missingAlign = false;
+	bool moveflag_HI = false;
+	bool moveflag_LO = false;
 	
 // IF/ID
 	int IFID_NPC;
@@ -47,7 +78,7 @@
 	int IDEX_Register_Rt1;
 	int IDEX_Register_Rt2;
 	int IDEX_Register_Rd;
-	int IDEX_ExtOp;
+	// int IDEX_ExtOp;   ???????
 	int IDEX_ALUSrc;
 	int IDEX_ALUOp;
 	int IDEX_RegDst;
@@ -70,8 +101,20 @@
 	int MEMWB_Data_Result;
 	int MEMWB_ALU_Result;
 	int MEMWB_Register_WB_Number;
-
+// other
 	int write_back;
+	int ALU_shift;
+	int ALU_input1;
+	int ALU_input2;
+// Instruction decoder
+	int opcode;
+	int r2521;
+	int r2016;
+	int r1511;
+	int r1006;
+	int r0500;
+	int r2500;
+	int r1500;
 	
 // Hazard detection
 	int HD_output_PC_Stall;
@@ -96,6 +139,7 @@ inline void init();
 inline void read_data();
 inline void print_all();
 inline void print_diff();
+inline void print_error();
 inline void finalize(int n);
 inline void WB_State();
 inline void DM_State();
@@ -103,6 +147,17 @@ inline void EX_State();
 inline void ID_State();
 inline void IF_State();
 inline void ALU();
+inline void forwarding_unit();
+inline void EX_mux1();
+inline void EX_mux2();
+inline void EX_mux3();
+inline void EX_mux4();
+inline void DM_DataMemory();
+inline void hazard_detector();
+inline void controller();
+inline void registers();
+inline void decoder();
+inline int scan_command(int start, int end);
 inline int memd2reg(int start, int len);
 
 // define macro setting

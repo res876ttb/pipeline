@@ -26,10 +26,91 @@ int main() {
 		ID_State();
 		IF_State();
 		
+		print_error();
 		print_diff();
 	} while(0);
 	finalize(0);
 	return 0;
+}
+
+//======================================================== inline void WB_State() =========
+inline void WB_State() {
+	#ifdef log
+		printf(">>> WB_State()\n");
+	#endif
+	//==================================================== mux =========
+	if (MEMWB_MemtoReg) {
+		write_back = MEMWB_Data_Result;
+	} else {
+		write_back = MEMWB_ALU_Result;
+	}
+	
+	//==================================================== forwarding unit input =========
+	FU_input_WB_Rd = MEMWB_Register_WB_Number;
+	FU_input_WB_MemtoReg = MEMWB_MemtoReg;
+	
+	#ifdef log
+		printf(">>> WB_State() done\n");
+	#endif
+}
+
+//======================================================== inline void DM_State() =========
+inline void DM_State() {
+	#ifdef log
+		printf(">>> DM_State()\n");
+	#endif
+	
+	DM_DataMemory();
+	
+	//==================================================== forwarding unit input =========
+	FU_input_DM_Rd = EXMEM_Register_WB_Number;
+	FU_input_DM_MemtoReg = EXMEM_MemtoReg;
+	
+	//==================================================== pass control signal to WB =========
+	MEMWB_MemtoReg = EXMEM_MemtoReg;
+	MEMWB_RegWr = EXMEM_RegWr;
+	
+	#ifdef log
+		printf(">>> DM_State() done\n");
+	#endif
+}
+
+//======================================================== inline void EX_State() =========
+inline void EX_State() {
+	#ifdef log
+		printf(">>> EX_State()\n");
+	#endif
+	int ALU_input1, ALU_input2;
+	forwarding_unit();
+	EX_mux1();
+	EX_mux2();
+	EX_mux3();
+	EX_mux4();
+	ALU();
+	#ifdef log
+		printf(">>> EX_State() done\n");
+	#endif
+}
+
+//======================================================== inline void ID_State() =========
+inline void ID_State() {
+	#ifdef log
+		printf(">>> ID_State()\n");
+	#endif
+	
+	decoder();
+	hazard_detector();
+	controller();
+	registers();
+	
+	#ifdef log
+		printf(">>> ID_State() done\n");
+	#endif
+}
+
+//======================================================== inline void IF_State() =========
+inline void IF_State() {
+	
 }
 
 //======================================================== inline void init() =========
@@ -179,33 +260,8 @@ inline void print_error() {
 	
 }
 
-//======================================================== inline void WB_State() =========
-inline void WB_State() {
-	#ifdef log
-		printf(">>> WB_State()\n");
-	#endif
-	//==================================================== mux =========
-	if (MEMWB_MemtoReg) {
-		write_back = MEMWB_ALU_Result;
-	} else {
-		write_back = MEMWB_Data_Result;
-	}
-	
-	//==================================================== forwarding unit input =========
-	FU_input_WB_Rd = MEMWB_Register_WB_Number;
-	FU_input_WB_MemtoReg = MEMWB_MemtoReg;
-	
-	#ifdef log
-		printf(">>> WB_State() done\n");
-	#endif
-}
-
-//======================================================== inline void DM_State() =========
-inline void DM_State() {
-	#ifdef log
-		printf(">>> DM_State()\n");
-	#endif
-	
+//======================================================== inline void DM_DataMemory() =========
+inline void DM_DataMemory() {
 	//==================================================== Memory error detection =========
 	// Deal with memory alignment error
 	// I don't know where to place this error detection
@@ -262,99 +318,6 @@ inline void DM_State() {
 			finalize(1);
 		break;
 	}
-	
-	//==================================================== forwarding unit input =========
-	FU_input_DM_Rd = EXMEM_Register_WB_Number;
-	FU_input_DM_MemtoReg = EXMEM_MemtoReg;
-	
-	//==================================================== pass control signal to WB =========
-	MEMWB_MemtoReg = EXMEM_MemtoReg;
-	MEMWB_RegWr = EXMEM_RegWr;
-	
-	#ifdef log
-		printf(">>> DM_State() done\n");
-	#endif
-}
-
-//======================================================== inline void EX_State() =========
-inline void EX_State() {
-	int ALU_input1, ALU_input2;
-	//==================================================== MUX1 =========
-		switch(FU_output_mux1) {
-			case 0:
-				ALU_input1 = IDEX_Register_Result[0];
-				break;
-			case 1:
-				ALU_input1 = write_back;
-				break;
-			case 2:
-				ALU_input1 = EXMEM_ALU_Result;
-				break;
-			default:
-				printf("<<< ERROR! invalid judge code in /EX_State/MUX1\n");
-				finalize(1);
-				break;
-		}
-	//==================================================== MUX2 =========
-		switch(FU_output_mux2) {
-			case 0:
-				ALU_input2 = IDEX_Register_Result[1];
-				break;
-			case 1:
-				ALU_input2 = write_back;
-				break;
-			case 2:
-				ALU_input2 = EXMEM_ALU_Result;
-				break;
-			default:
-				printf("<<< ERROR! invalid judge code in /EX_State/MUX2\n");
-				finalize(1);
-				break;
-		}
-	//==================================================== MUX3 =========
-		switch(IDEX_RegDst) {
-			case 0:
-				EXMEM_Register_WB_Number = IDEX_Register_Rt2;
-				break;
-			case 1:
-				EXMEM_Register_WB_Number = IDEX_Register_Rd;
-				break;
-			default:
-				printf("<<< ERROR! invalid judge code in /EX_State/MUX3\n");
-				finalize(1);
-				break;
-		}
-	//==================================================== MUX4 =========
-		switch(HD_output_EX_flush) {
-			case 0:
-				EXMEM_MemW = IDEX_MemW;
-				EXMEM_Branch = IDEX_Branch;
-				EXMEM_MemtoReg = IDEX_MemtoReg;
-				EXMEM_RegWr = IDEX_RegWr;
-				break;
-			case 1:
-				EXMEM_MemW = 0;
-				EXMEM_Branch = 0;
-				EXMEM_MemtoReg = 0;
-				EXMEM_RegWr = 0;
-				break;
-			default:
-				printf("<<< ERROR! invalid judge code in /EX_State/MUX4\n");
-				finalize(1);
-				break;
-		}
-	
-	ALU();
-}
-
-//======================================================== inline void ID_State() =========
-inline void ID_State() {
-	
-}
-
-//======================================================== inline void IF_State() =========
-inline void IF_State() {
-	
 }
 
 //======================================================== int memd2reg(int start, int len) =======
@@ -376,50 +339,297 @@ inline int memd2reg(int start, int len) {
     }
 }
 
-//======================================================== ALU =========
+//======================================================== inline void ALU() =========
 inline void ALU() {
+	#ifdef log
+	printf(">>> ALU()...  ");
+	#endif
+	
+	int ALU_result;
+	int tmp_sub;
+	long long tmp_mult;
+	long long tmp_multu;
 	switch (IDEX_ALUOp) {
 		case ADD:
-			
+			ALU_result = ALU_input1 + ALU_input2;
+			if ((ALU_result >= 0 && ALU_input1 <  0 && ALU_input2 <  0) || 
+			    (ALU_result <  0 && ALU_input1 >= 0 && ALU_input2 >= 0)) {
+				errorflag_overflow = true;
+			}
 			break;
 		case ADDU:
-			
+			ALU_result = ALU_input1 + ALU_input2;
 			break;
 		case SUB:
-			
+			tmp_sub = (~ALU_input2) + 1;
+			ALU_result = ALU_input1 + tmp_sub;
+			if ((ALU_result >= 0 && ALU_input1 <  0 && tmp_sub <  0) || 
+			    (ALU_result <  0 && ALU_input1 >= 0 && tmp_sub >= 0)) {
+				errorflag_overflow = true;
+			}
 			break;
 		case MULT:
-			
+			if (moveflag_HI || moveflag_LO) {
+				errorflag_overwrite = true;
+			}
+			moveflag_HI = moveflag_LO = false;
+			tmp_mult = (long long)ALU_input1 * (long long)ALU_input2;
+			HI = tmp_mult >> 32;
+			LO = tmp_mult & 0x00000000ffffffff;
 			break;
 		case MULTU:
-			
+			if (moveflag_HI || moveflag_LO) {
+				errorflag_overwrite = true;
+			}
+			moveflag_HI = moveflag_LO = false;
+			tmp_multu = (long long)((unsigned int)ALU_input1) * 
+					    (long long)((unsigned int)ALU_input2);
+			HI = tmp_multu >> 32;
+			LO = tmp_multu & 0x00000000ffffffff;
 			break;
 		case AND:
-			
+			ALU_result = ALU_input1 & ALU_input2;
 			break;
 		case OR:
-			
+			ALU_result = ALU_input1 | ALU_input2;
 			break;
 		case NAND:
-			
+			ALU_result = ~(ALU_input1 & ALU_input2);
 			break;
 		case NOR:
-			
+			ALU_result = ~(ALU_input1 | ALU_input2);
 			break;
 		case XOR:
-			
+			ALU_result = ALU_input1 ^ ALU_input2;
 			break;
 		case SHIFT_LEFT:
-			
+			ALU_result = ALU_input2 << ALU_shift;
 			break;
 		case SHIFT_RIGHT:
-			
+			ALU_result = (unsigned int)ALU_input2 >> ALU_shift;
 			break;
 		case SHIFT_RIGHT_ARITH:
-			
+			ALU_result = ALU_input2 >> ALU_shift;
+			break;
+		case LUI:
+			ALU_result = ALU_input2 << 16;
+			break;
+		case COMPARE:
+			ALU_result = (ALU_input1 < ALU_input2);
+			break;
+		case nothing:
 			break;
 		default:
-			
+			printf("<<< ERROR! invalid IDEX_ALUOp in /EX_State/ALU()\n");
+			finalize(1);
 			break;
 	}
+	EXMEM_ALU_Result = ALU_result;
+	
+	#ifdef log
+	printf("done\n");
+	#endif
+}
+
+//======================================================== void inline forwarding_unit() =========
+void inline forwarding_unit() {
+	if (EXMEM_RegWr && EXMEM_Register_WB_Number != 0) {
+		if (EXMEM_Register_WB_Number == IDEX_Register_Rs) {
+			FU_output_mux1 = 2;
+			FU_output_mux2 = 0;
+		} else if (EXMEM_Register_WB_Number == IDEX_Register_Rt1) {
+			FU_output_mux1 = 0;
+			FU_output_mux2 = 2;
+		} else {
+			FU_output_mux1 = 0;
+			FU_output_mux2 = 0;
+		}
+	} else if (MEMWB_RegWr && MEMWB_Register_WB_Number != 0) {
+		if (MEMWB_Register_WB_Number == IDEX_Register_Rs) {
+			FU_output_mux1 = 1;
+			FU_output_mux2 = 0;
+		} else if (MEMWB_Register_WB_Number == IDEX_Register_Rt1) {
+			FU_output_mux1 = 0;
+			FU_output_mux2 = 1;	
+		} else {
+			FU_output_mux1 = 0;
+			FU_output_mux2 = 0;	
+		}
+	} else {
+		FU_output_mux1 = 0;
+		FU_output_mux2 = 0;	
+	}
+}
+
+//======================================================== inline void EX_mux1() =========
+inline void EX_mux1() {
+	switch(FU_output_mux1) {
+		case 0:
+			ALU_input1 = IDEX_Register_Result[0];
+			break;
+		case 1:
+			ALU_input1 = write_back;
+			break;
+		case 2:
+			ALU_input1 = EXMEM_ALU_Result;
+			break;
+		default:
+			printf("<<< ERROR! invalid judge code in /EX_State/MUX1\n");
+			finalize(1);
+			break;
+	}
+}
+
+//======================================================== inline void EX_mux2() =========
+inline void EX_mux2() {
+	switch(FU_output_mux2) {
+		case 0:
+			if (IDEX_ALUSrc) {
+				ALU_input2 = IDEX_Signed_extend;
+			} else {
+				ALU_input2 = IDEX_Register_Result[1];
+			}
+			break;
+		case 1:
+			ALU_input2 = write_back;
+			break;
+		case 2:
+			ALU_input2 = EXMEM_ALU_Result;
+			break;
+		default:
+			printf("<<< ERROR! invalid judge code in /EX_State/MUX2\n");
+			finalize(1);
+			break;
+	}
+}
+
+//======================================================== inline void EX_mux3() =========
+inline void EX_mux3() {
+	switch(IDEX_RegDst) {
+		case 0:
+			EXMEM_Register_WB_Number = IDEX_Register_Rt2;
+			break;
+		case 1:
+			EXMEM_Register_WB_Number = IDEX_Register_Rd;
+			break;
+		default:
+			printf("<<< ERROR! invalid judge code in /EX_State/MUX3\n");
+			finalize(1);
+			break;
+	}
+}
+
+//======================================================== inline void EX_mux4() =========
+inline void EX_mux4() {
+	switch(HD_output_EX_flush) {
+		case 0:
+			EXMEM_MemW     = IDEX_MemW;
+			EXMEM_Branch   = IDEX_Branch;
+			EXMEM_MemtoReg = IDEX_MemtoReg;
+			EXMEM_RegWr    = IDEX_RegWr;
+			break;
+		case 1:
+			EXMEM_MemW     = 0;
+			EXMEM_Branch   = 0;
+			EXMEM_MemtoReg = 0;
+			EXMEM_RegWr    = 0;
+			break;
+		default:
+			printf("<<< ERROR! invalid judge code in /EX_State/MUX4\n");
+			finalize(1);
+			break;
+	}
+}
+
+inline void hazard_detector() {
+	if (IDEX_Branch) {
+		
+	} else if (IDEX_MemtoReg) {
+		
+	}
+}
+
+inline void controller() {
+	// IDEX_ExtOp = ; ?????
+	//=============================== IDEX_ALUSrc ===============================
+	switch(opcode) {
+		case ADDI: case ADDIU: case LUI: case ANDI: case ORI: case NORI: case SLTI: 
+			IDEX_ALUSrc = 1;
+			break;
+		default:
+			IDEX_ALUSrc = 0;
+			break;
+	}
+	
+	//=============================== IDEX_ALUOp ================================
+	     if (opcode == ADDI  || (opcode == 0 && r0500 == ADD )) IDEX_ALUOp = ADD;
+	else if (opcode == ADDIU || (opcode == 0 && r0500 == ADDU)) IDEX_ALUOp = ADDU;
+	else if (                    opcode == 0 && r0500 == SUB  ) IDEX_ALUOp = SUB;
+	else if (                    opcode == 0 && r0500 == MULT ) IDEX_ALUOp = MULT;
+	else if (                    opcode == 0 && r0500 == MULTU) IDEX_ALUOp = MULTU;
+	else if (opcode == ANDI  || (opcode == 0 && r0500 == AND )) IDEX_ALUOp = AND;
+	else if (opcode == ORI   || (opcode == 0 && r0500 == OR  )) IDEX_ALUOp = OR;
+	else if (                    opcode == 0 && r0500 == NAND ) IDEX_ALUOp = NAND;
+	else if (opcode == NORI  || (opcode == 0 && r0500 == NOR )) IDEX_ALUOp = NOR;
+	else if (                    opcode == 0 && r0500 == XOR  ) IDEX_ALUOp = XOR;
+	else if (                    opcode == 0 && r0500 == SLL  ) IDEX_ALUOp = SLL;
+	else if (                    opcode == 0 && r0500 == SRL  ) IDEX_ALUOp = SRL;
+	else if (                    opcode == 0 && r0500 == SRA  ) IDEX_ALUOp = SRA;
+	else if (opcode == LUI                                    ) IDEX_ALUOp = LUI;
+	else if (opcode == SLTI  || (opcode == 0 && r0500 == SLT )) IDEX_ALUOp = COMPARE;
+	else                                                        IDEX_ALUOp = nothing;
+	
+	//=============================== IDEX_RegDst ===============================
+	IDEX_RegDst = !opcode;
+	
+	//=============================== IDEX_MemW =================================
+	switch(opcode) {
+		case LW:  IDEX_MemW = 114; break;
+		case LH:  IDEX_MemW = 112; break;
+		case LHU: IDEX_MemW = 122; break;
+		case LB:  IDEX_MemW = 111; break;
+		case LBU: IDEX_MemW = 121; break;
+		case SW:  IDEX_MemW = 214; break;
+		case SH:  IDEX_MemW = 212; break;
+		case SB:  IDEX_MemW = 211; break;
+		default:  IDEX_MemW = 0;   break;
+	}
+	
+	//=============================== IDEX_Branch ===============================
+	IDEX_Branch = (opcode == J || opcode == JAL);
+	
+	//=============================== IDEX_MemtoReg =============================
+	IDEX_MemtoReg = (opcode == LW  || opcode == LH || opcode == LB || 
+	                 opcode == LHU || opcode == LBU);
+	
+	//=============================== IDEX_RegWr ================================
+	IDEX_RegWr = !((opcode == 0 &&
+	               (opcode == JR  || opcode == MULT || opcode == MULTU)) || 
+	                opcode == SW  || opcode == SH   || opcode == SB      ||
+	                opcode == BEQ || opcode == BNE  || opcode == BGTZ    ||
+	                opcode == J   || opcode == JAL  || opcode == HALT);
+}
+
+inline void decoder() {
+	opcode = scan_command(31,26);
+	r2521  = scan_command(25,21);
+	r2016  = scan_command(20,16);
+	r1511  = scan_command(25,11);
+	r1006  = scan_command(10, 6);
+	r0500  = scan_command( 5, 0);
+	r2500  = scan_command(25, 0);
+	r1500  = scan_command(15, 0);
+}
+
+inline void registers() {
+	if (MEMWB_RegWr) {
+		regi[MEMWB_Register_WB_Number] = write_back;
+	}
+	IDEX_Register_Result[0] = regi[r2521];
+	IDEX_Register_Result[1] = regi[r2016];
+}
+
+inline int scan_command(int start, int end) {
+    unsigned int b=0xFFFFFFFF;
+    return (command>>end)&(b>>(end+31-start));
 }
