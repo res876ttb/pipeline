@@ -8,18 +8,7 @@ int main() {
 	print_all();
 	do {
 		cycle++;
-		command = memi[PC/4];
-		#ifdef log
-		printf("Command = 0x%08X\n", command);
-		#endif
-		// skip command sll $0 $0 0, but how ??????
-		if ((command & 0xfc1fffff) == 0) {
-			// TODO
-			PC += 4;
-			print_diff();
-			continue;
-		}
-		
+
 		WB_State();
 		DM_State();
 		EX_State();
@@ -80,6 +69,7 @@ inline void EX_State() {
 	#ifdef log
 		printf(">>> EX_State()\n");
 	#endif
+	
 	int ALU_input1, ALU_input2;
 	forwarding_unit();
 	EX_mux1();
@@ -87,6 +77,7 @@ inline void EX_State() {
 	EX_mux3();
 	EX_mux4();
 	ALU();
+	
 	#ifdef log
 		printf(">>> EX_State() done\n");
 	#endif
@@ -98,10 +89,13 @@ inline void ID_State() {
 		printf(">>> ID_State()\n");
 	#endif
 	
-	decoder();
-	hazard_detector();
-	controller();
-	registers();
+	if (!IDEX_Stall) {
+		IDEX_Register_RtB = IDEX_Register_Rt1;
+		decoder();
+		controller();
+		registers();
+		hazard_detector();
+	}
 	
 	#ifdef log
 		printf(">>> ID_State() done\n");
@@ -110,7 +104,26 @@ inline void ID_State() {
 
 //======================================================== inline void IF_State() =========
 inline void IF_State() {
+	#ifdef log
+		printf(">>> IF_State()\n");
+	#endif
 	
+	if (!IFID_Stall) {
+		if (PCSel == 1) {
+			PC = IDEX_PC;
+		} else if (PCSel == 2) {
+			PC = 0x80000180;
+		} else if (PCSel == 3) {
+			PC = IFID_NPC;
+		}
+		IFID_NPC = PC + 4;
+		
+		command = memi[PC / 4];	
+	}
+	
+	#ifdef log
+		printf(">>> IF_State() done\n");
+	#endif
 }
 
 //======================================================== inline void init() =========
@@ -542,10 +555,27 @@ inline void EX_mux4() {
 }
 
 inline void hazard_detector() {
+	// TODO: need to specify the branch more clearly
 	if (IDEX_Branch) {
-		
+		if ((opcode == BEQ  &&  reg_output_equal) || 
+		    (opcode == BNE  && !reg_output_equal) || 
+		    (opcode == BGTZ && (r2521 > 0))) {
+			IFID_Flush = 1;
+		} else if (opcode == J || opcode == JAL) {
+			IFID_Flush = 1;
+		} else {
+			IFID_Flush = 0;
+		}
 	} else if (IDEX_MemtoReg) {
-		
+		if ((IDEX_MemW / 100 == 1) &&
+		    (IDEX_Register_RtB == IDEX_Register_Rs) ||
+		    (IDEX_Register_RtB == IDEX_Register_Rt1)) {
+			IFID_Stall = 1;
+			IDEX_Stall = 1;
+		} else {
+			IFID_Stall = 0;
+			IDEX_Stall = 0;
+		}
 	}
 }
 
@@ -608,6 +638,8 @@ inline void controller() {
 	                opcode == SW  || opcode == SH   || opcode == SB      ||
 	                opcode == BEQ || opcode == BNE  || opcode == BGTZ    ||
 	                opcode == J   || opcode == JAL  || opcode == HALT);
+	
+	// TODO: flush signal and next pc signal
 }
 
 inline void decoder() {
@@ -627,6 +659,7 @@ inline void registers() {
 	}
 	IDEX_Register_Result[0] = regi[r2521];
 	IDEX_Register_Result[1] = regi[r2016];
+	reg_output_equal = (IDEX_Register_Result[0] == IDEX_Register_Result[1]);
 }
 
 inline int scan_command(int start, int end) {
