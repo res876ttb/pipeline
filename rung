@@ -1,0 +1,12 @@
+#!/bin/bash
+
+x=''
+
+echo ">>> Testing $1 ==========================="
+cp $1 .
+./p
+cat snapshot.rpt
+echo "Press enter to show error_dump.rpt"
+read x
+cat error_dump.rpt
+

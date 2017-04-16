@@ -1,9 +1,0 @@
-#!/bin/bash
-
-make
-if [ $? == 0 ]; then
-	cp ../testcase/iimage.bin .
-	cp ../testcase/dimage.bin .
-	./pipeline
-fi
-

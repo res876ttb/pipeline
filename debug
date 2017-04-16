@@ -1,0 +1,39 @@
+#!/bin/bash
+
+cd simulator
+make
+if [ $? != 0 ]; then
+    exit 1
+fi
+
+cd ..
+
+for a in `cat list`
+do
+    echo ">>> Testing $a ========================="
+    cp testcase/$a/dimage.bin .
+    cp testcase/$a/iimage.bin .
+    cp simulator/pipeline .
+    ./p
+    mv snapshot.rpt snapshotTA.rpt
+    mv error_dump.rpt error_dumpTA.rpt
+
+    ./pipeline
+
+    diff snapshot.rpt snapshotTA.rpt
+    if [ $? == 0 ]; then
+        echo "snapshot.rpt done!"
+    else
+        echo "some difference in snapshot.rpt!"
+        exit 1
+    fi
+
+    diff error_dump.rpt error_dumpTA.rpt
+    if [ $? == 0 ]; then
+        echo "error_dump.rpt done!"
+    else
+        echo "some difference in error_dump.rpt!"
+        exit 1
+    fi
+done
+
