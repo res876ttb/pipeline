@@ -1,8 +1,15 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
+using namespace std;
+
 // if define log: print out data path
-#define log
-#define debug
+// #define log
+// #define debug
+// #define pause
 
 // define ALUop and decoder
+#define NOP 				0x11111111
 #define SHIFT_LEFT 			0x00
 #define SHIFT_RIGHT 		0x02
 #define SHIFT_RIGHT_ARITH 	0x03
@@ -47,6 +54,11 @@
 #define JAL		0x03
 #define HALT	0x3F
 
+#define FLUSH   0x99999999
+
+char rs[3] = "rs";
+char rt[3] = "rt";
+
 // variable definition
 	FILE *fout, *ferr;
 	int regi[32];
@@ -67,7 +79,15 @@
 	bool errorflag_missingAlign = false;
 	bool moveflag_HI = false;
 	bool moveflag_LO = false;
-	
+
+// state
+	string IF_State;
+	string ID_State;
+	string EX_State;
+	string DM_State;
+	string WB_State;
+	string ID_StateN;
+
 // IF/ID
 	int IFID_NPC;
 	int IFID_PC_input1;
@@ -75,18 +95,20 @@
 	int IFID_Instruction_code;
 	int IFID_Flush;
 	int IFID_Stall;
+	int IFID_Stall_P;
 	int PCSel;
 // ID/EX
 	int IDEX_PC;
 	int IDEX_Register_Result[2];
 	int IDEX_Signed_extend;
 	int IDEX_Register_Rs;
-	int IDEX_Register_Rt1;
-	int IDEX_Register_Rt2;
+	int IDEX_Register_Rt;
 	int IDEX_Register_RtB;
 	int IDEX_Register_Rd;
+	int IDEX_Register_RdB;
 	int IDEX_Flush;
 	int IDEX_Stall;
+	int IDEX_NStall = 1;
 	// int IDEX_ExtOp;
 	int IDEX_ALUSrc;
 	int IDEX_ALUOp;
@@ -96,27 +118,42 @@
 	int IDEX_MemtoReg;
 	int IDEX_RegWr;
 // EX/MEM
+	int EXMEM_MemtoRegB = 0;
+	int EXMEM_MemWB = 0;
 	int EXMEM_Flush;
-	int EXMEM_MemW;
-	int EXMEM_Branch;
+	int EXMEM_MemW = 0;
+	int EXMEM_Branch = 0;
 	int EXMEM_MemtoReg;
 	int EXMEM_RegWr;
 	int EXMEM_ALU_Result;
 	int EXMEM_ALU_Overflow;
 	int EXMEM_ALU_input2;
 	int EXMEM_Register_WB_Number;
+	
+	int EXMEM_Register_Rs;
+	int EXMEM_Register_Rt;
+	int EXMEM_Register_Rd;
 // MEM/WB
 	int MEMWB_MemtoReg;
 	int MEMWB_RegWr;
+	int MEMWB_RegWrB;
+	int MEMWB_RegWrBB;
 	int MEMWB_Data_Result;
 	int MEMWB_ALU_Result;
 	int MEMWB_Register_WB_Number;
+	int MEMWB_Register_WB_NumberN;
+	int MEMWB_Register_WB_NumberNB;
 // other
 	int write_back;
+	int write_backN;
 	int ALU_shift;
 	int ALU_input1;
 	int ALU_input2;
 	int reg_output_equal;
+	int registers_tmp1;
+	int registers_tmp2;
+	int registers_tmp3;
+	string registers_tmp4;
 	
 // Instruction decoder
 	int opcode;
@@ -145,6 +182,10 @@
 	int FU_input_IDEX_rt;
 	int FU_output_mux1;
 	int FU_output_mux2;
+	int forwarding;
+	int FU_source_register;
+	char *FU_source_type;
+	char *FU_source;
 
 // functions definition
 inline void init();
@@ -153,11 +194,11 @@ inline void print_all();
 inline void print_diff();
 inline void print_error();
 inline void finalize(int n);
-inline void WB_State();
-inline void DM_State();
-inline void EX_State();
-inline void ID_State();
-inline void IF_State();
+inline void WB_Stage();
+inline void DM_Stage();
+inline void EX_Stage();
+inline void ID_Stage();
+inline void IF_Stage();
 inline void ALU();
 inline void forwarding_unit();
 inline void EX_mux1();
@@ -169,6 +210,7 @@ inline void hazard_detector();
 inline void controller();
 inline void registers();
 inline void decoder();
+inline void set_state();
 inline int scan_command(int start, int end);
 inline int memd2reg(int start, int len);
 

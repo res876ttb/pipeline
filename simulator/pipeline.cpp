@@ -1,32 +1,48 @@
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "define.hpp"
 
 int main() {
 	init();
 	print_all();
+	
+	IF_Stage();
+	
 	do {
 		cycle++;
 
-		WB_State();
-		DM_State();
-		EX_State();
-		ID_State();
-		IF_State();
+		WB_Stage();
+		DM_Stage();
+		EX_Stage();
+		ID_Stage();
+		IF_Stage();
 		
 		print_error();
 		print_diff();
-	} while(0);
+		
+		if (IDEX_Stall > 0) IDEX_Stall--;
+		if (IFID_Stall > 0) IFID_Stall--;
+		
+		if (WB_State == DM_State && DM_State == EX_State && EX_State == ID_State && 
+		    scan_command(31,26) == 0x3F) {
+			break;
+		}
+		#ifdef pause
+			printf("Press enter to continue...\n");
+			getchar();
+		#endif
+	} while(true);
 	finalize(0);
 	return 0;
 }
 
-//======================================================== inline void WB_State() =========
-inline void WB_State() {
+//======================================================== inline void WB_Stage() =========
+inline void WB_Stage() {
 	#ifdef log
-		printf(">>> WB_State()\n");
+		printf(">>> WB_Stage()\n");
+		printf(">>> cycle = %d\n", cycle);
 	#endif
+		
+	WB_State = DM_State;
+	if (WB_State == "NOP") return;
 	//==================================================== mux =========
 	if (MEMWB_MemtoReg) {
 		write_back = MEMWB_Data_Result;
@@ -39,76 +55,116 @@ inline void WB_State() {
 	FU_input_WB_MemtoReg = MEMWB_MemtoReg;
 	
 	#ifdef log
-		printf(">>> WB_State() done\n");
+		printf(">>> WB_Stage() done\n");
 	#endif
 }
 
-//======================================================== inline void DM_State() =========
-inline void DM_State() {
+//======================================================== inline void DM_Stage() =========
+inline void DM_Stage() {
 	#ifdef log
-		printf(">>> DM_State()\n");
+		printf(">>> DM_Stage()\n");
 	#endif
 	
-	DM_DataMemory();
+	DM_State = EX_State;
 	
 	//==================================================== forwarding unit input =========
 	FU_input_DM_Rd = EXMEM_Register_WB_Number;
 	FU_input_DM_MemtoReg = EXMEM_MemtoReg;
 	
 	//==================================================== pass control signal to WB =========
+	MEMWB_RegWrB = MEMWB_RegWr;
 	MEMWB_MemtoReg = EXMEM_MemtoReg;
 	MEMWB_RegWr = EXMEM_RegWr;
 	
+	if (DM_State == "NOP") return;
+	
+	DM_DataMemory();
+	
+	MEMWB_Register_WB_Number = EXMEM_Register_WB_Number;
+	
 	#ifdef log
-		printf(">>> DM_State() done\n");
+		printf(">>> DM_Stage() done\n");
 	#endif
 }
 
-//======================================================== inline void EX_State() =========
-inline void EX_State() {
+//======================================================== inline void EX_Stage() =========
+inline void EX_Stage() {
 	#ifdef log
-		printf(">>> EX_State()\n");
+		printf(">>> EX_Stage()\n");
 	#endif
+	
+	EX_State = ID_StateN;
+	EXMEM_MemWB = EXMEM_MemW;
+	EXMEM_MemtoRegB = EXMEM_MemtoReg;
+	EX_mux3();
 	
 	int ALU_input1, ALU_input2;
 	forwarding_unit();
 	EX_mux1();
 	EX_mux2();
-	EX_mux3();
 	EX_mux4();
 	ALU();
 	
 	#ifdef log
-		printf(">>> EX_State() done\n");
+		printf(">>> EX_Stage() done\n");
 	#endif
 }
 
-//======================================================== inline void ID_State() =========
-inline void ID_State() {
+//======================================================== inline void ID_Stage() =========
+inline void ID_Stage() {
 	#ifdef log
-		printf(">>> ID_State()\n");
+		printf(">>> ID_Stage()\n");
 	#endif
-	
-	if (!IDEX_Stall) {
-		IDEX_Register_RtB = IDEX_Register_Rt1;
-		decoder();
-		controller();
-		registers();
-		hazard_detector();
+	if (!IDEX_Stall && !IDEX_Flush) {
+		ID_State = IF_State;
 	}
 	
+	IDEX_Register_RtB = IDEX_Register_Rt;
+	IDEX_Register_RdB = IDEX_Register_Rd;
+	IDEX_Register_Rs  = r2521;
+	IDEX_Register_Rt  = r2016;
+	IDEX_Register_Rt  = r2016;
+	IDEX_Register_Rd  = r1511;
+
+	hazard_detector();
+	controller();
+	registers();
+	
+	if (IDEX_Flush) {
+		ID_StateN     = "NOP";
+		IDEX_ALUSrc   = FLUSH;
+		IDEX_ALUOp    = FLUSH;
+		IDEX_RegDst   = FLUSH;
+		IDEX_MemW     = FLUSH;
+		IDEX_Branch   = FLUSH;
+		IDEX_MemtoReg = FLUSH;
+		IDEX_RegWr 	  = FLUSH;
+	} else {
+		if (IDEX_Stall) {
+			ID_StateN = "NOP";
+		} else {
+			ID_StateN = ID_State;
+		}
+	}
+	
+	write_backN = write_back;
+	MEMWB_Register_WB_NumberN = MEMWB_Register_WB_Number;
+	
 	#ifdef log
-		printf(">>> ID_State() done\n");
+		printf(">>> ID_Stage() done\n");
 	#endif
 }
 
-//======================================================== inline void IF_State() =========
-inline void IF_State() {
+//======================================================== inline void IF_Stage() =========
+inline void IF_Stage() {
 	#ifdef log
-		printf(">>> IF_State()\n");
+		printf(">>> IF_Stage()\n");
 	#endif
 	
-	if (!IFID_Stall) {
+	// printf("in cycle %d, IFID_Stall =  %d, IFID_Stall_P = %d\n", cycle, IFID_Stall, IFID_Stall_P);
+	
+	if (!IFID_Stall_P) {
+		// printf("In cycle %d, PCSel = %d\n", cycle, PCSel);
 		if (PCSel == 1) {
 			PC = IDEX_PC;
 		} else if (PCSel == 2) {
@@ -116,13 +172,16 @@ inline void IF_State() {
 		} else if (PCSel == 3) {
 			PC = IFID_NPC;
 		}
-		IFID_NPC = PC + 4;
-		
-		command = memi[PC / 4];	
 	}
+	IFID_NPC = PC + 4;
+	command = memi[PC / 4];	
+	decoder();
+	set_state();
+	IFID_Stall_P = IFID_Stall;
+	
 	
 	#ifdef log
-		printf(">>> IF_State() done\n");
+		printf(">>> IF_Stage() done\n");
 	#endif
 }
 
@@ -149,6 +208,16 @@ inline void init() {
 	
 	read_data();
 	
+	WB_State  = "NOP";
+	DM_State  = "NOP";
+	EX_State  = "NOP";
+	ID_State  = "NOP";
+	ID_StateN = "NOP";
+	IF_State  = "NOP";
+	
+	PCSel = 3;
+	IFID_NPC = PC;
+
 	#ifdef log
 		printf(">>> init() done\n");
 	#endif
@@ -250,27 +319,82 @@ inline void print_diff() {
 	oprintf("cycle %d\n", cycle);
 	for (int i = 0; i < 32; i++) {
 		if (regi[i] != regi2[i]) {
-			oprintf("$%02d: %08X\n", i, regi[i]);
+			oprintf("$%02d: 0x%08X\n", i, regi[i]);
 			regi2[i] = regi[i];
 		}
 	}
 	if (HI != HI2) {
-		oprintf("$HI: %08X\n", HI);
+		oprintf("$HI: 0x%08X\n", HI);
 		HI2 = HI;
 	}
 	if (LO != LO2) {
-		oprintf("$LO: %08X\n", LO);
-		HI2 = LO;
+		oprintf("$LO: 0x%08X\n", LO);
+		LO2 = LO;
 	}
-	if (PC != PC2) {
-		oprintf("PC: %08X\n", PC);
-		HI2 = PC;
+
+	oprintf("PC: 0x%08X\n", PC);
+	
+	oprintf("IF: 0x%08X", command);
+	if (IFID_Stall_P || IFID_Stall) {
+		oprintf(" to_be_stalled\n");
+	} else if (IFID_Flush) {
+		oprintf(" to_be_flushed\n");
+	} else {
+		oprintf("\n");
 	}
+	
+	oprintf("ID: %s", ID_State.c_str());
+	if (IDEX_Stall) {
+		oprintf(" to_be_stalled\n");
+	} else if (IDEX_Flush) {
+		oprintf(" to_be_flushed\n");
+	} else if (forwarding) {
+		// oprintf("\n");
+		oprintf(" fwd_EX-DM_%s_$%d\n", FU_source_type, FU_source_register);
+	} else {
+		oprintf("\n");
+	}
+	
+	oprintf("EX: %s\n", EX_State.c_str());
+	oprintf("DM: %s\n", DM_State.c_str());
+	oprintf("WB: %s\n", WB_State.c_str());
+	oprintf("\n\n");
 }
 
 //======================================================== inline void print_error() =========
 inline void print_error() {
+	// print error messages
+	if (errorflag_write0) {
+		eprintf("In cycle %d: Write $0 Error\n", cycle);
+	    // eout<<"In cycle "<<dec<<cycle<<": Write $0 Error"<<endl;
+	    errorflag_write0=false;
+	}
 	
+	if (errorflag_overflow) {
+		eprintf("In cycle %d: Number Overflow\n", cycle);
+	    // eout<<"In cycle "<<dec<<cycle<<": Number Overflow"<<endl;
+	    errorflag_overflow=false;
+	}
+	
+	if (errorflag_overwrite) {
+		eprintf("In cycle %d: Overwrite HI-LO registers\n", cycle);
+	    // eout<<"In cycle "<<dec<<cycle<<": Overwrite HI-LO registers"<<endl;
+	    errorflag_overwrite=false;
+	}
+	
+	if (errorflag_memoryOverflow) {
+		eprintf("In cycle %d: Address Overflow\n", cycle);
+	    // eout<<"In cycle "<<dec<<cycle<<": Address Overflow"<<endl;
+	}
+	
+	if (errorflag_missingAlign) {
+		eprintf("In cycle %d: Misalignment Error\n", cycle);
+	    // eout<<"In cycle "<<dec<<cycle<<": Misalignment Error"<<endl;
+	}
+	
+	if (errorflag_memoryOverflow || errorflag_missingAlign) {
+	    finalize(1);
+	}
 }
 
 //======================================================== inline void DM_DataMemory() =========
@@ -284,6 +408,10 @@ inline void DM_DataMemory() {
 		}
 		if (EXMEM_ALU_Result % (EXMEM_MemW % 10) != 0) {
 			errorflag_missingAlign = true;
+		}
+		
+		if (errorflag_memoryOverflow || errorflag_missingAlign) {
+			return;
 		}
 		
 		#ifdef debug
@@ -362,6 +490,7 @@ inline void ALU() {
 	int tmp_sub;
 	long long tmp_mult;
 	long long tmp_multu;
+	// printf("input1 = %d, input2 = %d, ALUOP = %d\n", ALU_input1, ALU_input2, IDEX_ALUOp);
 	switch (IDEX_ALUOp) {
 		case ADD:
 			ALU_result = ALU_input1 + ALU_input2;
@@ -431,9 +560,10 @@ inline void ALU() {
 			ALU_result = (ALU_input1 < ALU_input2);
 			break;
 		case nothing:
+			ALU_result = 0;
 			break;
 		default:
-			printf("<<< ERROR! invalid IDEX_ALUOp in /EX_State/ALU()\n");
+			printf("<<< ERROR! invalid IDEX_ALUOp in /EX_Stage/ALU()\n");
 			finalize(1);
 			break;
 	}
@@ -445,30 +575,51 @@ inline void ALU() {
 }
 
 //======================================================== void inline forwarding_unit() =========
-void inline forwarding_unit() {
-	if (EXMEM_RegWr && EXMEM_Register_WB_Number != 0) {
-		if (EXMEM_Register_WB_Number == IDEX_Register_Rs) {
-			FU_output_mux1 = 2;
-			FU_output_mux2 = 0;
-		} else if (EXMEM_Register_WB_Number == IDEX_Register_Rt1) {
-			FU_output_mux1 = 0;
-			FU_output_mux2 = 2;
+inline void forwarding_unit() {
+	if (opcode != HALT) {
+		if (EXMEM_RegWr && EXMEM_Register_WB_Number != 0) {
+			if (EXMEM_Register_WB_Number == IDEX_Register_Rs) {
+				forwarding = 1;
+				FU_source_register = IDEX_Register_Rs;
+				FU_source_type = rs;
+				FU_output_mux1 = 2;
+				FU_output_mux2 = 0;
+			} else if (EXMEM_Register_WB_Number == IDEX_Register_Rt) {
+				forwarding = 1;
+				FU_source_register = IDEX_Register_Rt;
+				FU_source_type = rt;
+				FU_output_mux1 = 0;
+				FU_output_mux2 = 2;
+			} else {
+				forwarding = 0;
+				FU_output_mux1 = 0;
+				FU_output_mux2 = 0;
+			}
+		} else if (MEMWB_RegWrB && MEMWB_Register_WB_Number != 0) {
+			if (MEMWB_Register_WB_Number == IDEX_Register_Rs) {
+				forwarding = 1;
+				FU_source_register = IDEX_Register_Rs;
+				FU_source_type = rs;
+				FU_output_mux1 = 1;
+				FU_output_mux2 = 0;
+			} else if (MEMWB_Register_WB_Number == IDEX_Register_Rt) {
+				forwarding = 1;
+				FU_source_register = IDEX_Register_Rt;
+				FU_source_type = rt;
+				FU_output_mux1 = 0;
+				FU_output_mux2 = 1;	
+			} else {
+				forwarding = 0;
+				FU_output_mux1 = 0;
+				FU_output_mux2 = 0;	
+			}
 		} else {
-			FU_output_mux1 = 0;
-			FU_output_mux2 = 0;
-		}
-	} else if (MEMWB_RegWr && MEMWB_Register_WB_Number != 0) {
-		if (MEMWB_Register_WB_Number == IDEX_Register_Rs) {
-			FU_output_mux1 = 1;
-			FU_output_mux2 = 0;
-		} else if (MEMWB_Register_WB_Number == IDEX_Register_Rt1) {
-			FU_output_mux1 = 0;
-			FU_output_mux2 = 1;	
-		} else {
+			forwarding = 0;
 			FU_output_mux1 = 0;
 			FU_output_mux2 = 0;	
-		}
+		}	
 	} else {
+		forwarding = 0;
 		FU_output_mux1 = 0;
 		FU_output_mux2 = 0;	
 	}
@@ -487,7 +638,7 @@ inline void EX_mux1() {
 			ALU_input1 = EXMEM_ALU_Result;
 			break;
 		default:
-			printf("<<< ERROR! invalid judge code in /EX_State/MUX1\n");
+			printf("<<< ERROR! invalid judge code in /EX_Stage/MUX1\n");
 			finalize(1);
 			break;
 	}
@@ -510,7 +661,7 @@ inline void EX_mux2() {
 			ALU_input2 = EXMEM_ALU_Result;
 			break;
 		default:
-			printf("<<< ERROR! invalid judge code in /EX_State/MUX2\n");
+			printf("<<< ERROR! invalid judge code in /EX_Stage/MUX2\n");
 			finalize(1);
 			break;
 	}
@@ -518,17 +669,10 @@ inline void EX_mux2() {
 
 //======================================================== inline void EX_mux3() =========
 inline void EX_mux3() {
-	switch(IDEX_RegDst) {
-		case 0:
-			EXMEM_Register_WB_Number = IDEX_Register_Rt2;
-			break;
-		case 1:
-			EXMEM_Register_WB_Number = IDEX_Register_Rd;
-			break;
-		default:
-			printf("<<< ERROR! invalid judge code in /EX_State/MUX3\n");
-			finalize(1);
-			break;
+	if (IDEX_RegDst) {
+		EXMEM_Register_WB_Number = IDEX_Register_Rd;
+	} else {
+		EXMEM_Register_WB_Number = IDEX_Register_Rt;
 	}
 }
 
@@ -548,12 +692,13 @@ inline void EX_mux4() {
 			EXMEM_RegWr    = 0;
 			break;
 		default:
-			printf("<<< ERROR! invalid judge code in /EX_State/MUX4\n");
+			printf("<<< ERROR! invalid judge code in /EX_Stage/MUX4\n");
 			finalize(1);
 			break;
 	}
 }
 
+//======================================================== inline void hazard_detector() =========
 inline void hazard_detector() {
 	// TODO: need to specify the branch more clearly
 	if (IDEX_Branch) {
@@ -566,19 +711,62 @@ inline void hazard_detector() {
 		} else {
 			IFID_Flush = 0;
 		}
-	} else if (IDEX_MemtoReg) {
-		if ((IDEX_MemW / 100 == 1) &&
+		PCSel = 1;
+	} else {
+		PCSel = 3;
+	}
+	
+	// TODO
+	HD_output_EX_flush = 0;
+	
+	#ifdef debug
+	printf(">>> cycle = %d\n", cycle);
+	printf(">>> opcode = %X, %X\n", opcode, BEQ);
+	// printf(">>> command = 0x%08X\n", command);
+	printf(">>> EXMEM_MemtoRegB = %d, EXMEM_MemWB = %d\n", EXMEM_MemtoRegB, EXMEM_MemWB);
+	printf(">>> EXMEM_MemtoReg  = %d, EXMEM_MemW  = %d\n", EXMEM_MemtoReg , EXMEM_MemW );
+	printf(">>> IDEX_Register_RtB = %d, IDEX_Register_Rs = %d, \n    IDEX_Register_Rt = %d, IDEX_Register_Rd = %d,\n    IDEX_Register_RdB = %d\n\n", IDEX_Register_RtB, IDEX_Register_Rs, IDEX_Register_Rt, IDEX_Register_Rd, IDEX_Register_RdB);
+	printf(">>><<< judge: %d\n", (IDEX_MemW / 100 == 1));
+	#endif
+	
+	if (cycle == 3) printf("IDEX_Stall = %d\n", IDEX_Stall);
+	if (EXMEM_MemtoReg || EXMEM_MemtoRegB) {
+		if ((EXMEM_MemW / 100 == 1) && (
 		    (IDEX_Register_RtB == IDEX_Register_Rs) ||
-		    (IDEX_Register_RtB == IDEX_Register_Rt1)) {
-			IFID_Stall = 1;
-			IDEX_Stall = 1;
+		    (IDEX_Register_RtB == IDEX_Register_Rt) ||
+		    ((opcode == BEQ || opcode == BNE || opcode == BGTZ) && (
+		      (IDEX_Register_RdB == IDEX_Register_Rs) ||
+		      (IDEX_Register_RdB == IDEX_Register_Rt))))) {
+			#ifdef debug
+			printf("================= stall =================\n");
+			printf("In cycle %d\n", cycle);
+			#endif
+			IFID_Stall = 3;
+			IDEX_Stall = 3;
+		} else if ((EXMEM_MemWB / 100 == 1) && (
+		    (IDEX_Register_RtB == IDEX_Register_Rs) ||
+		    (IDEX_Register_RtB == IDEX_Register_Rt) ||
+		    ((opcode == BEQ || opcode == BNE || opcode == BGTZ) && (
+		      (IDEX_Register_RdB == IDEX_Register_Rs) ||
+		      (IDEX_Register_RdB == IDEX_Register_Rt))))) {
+			#ifdef debug
+			printf("================= stall =================\n");
+			printf("In cycle %d\n", cycle);
+			#endif
+			IFID_Stall = 2;
+			IDEX_Stall = 2;
 		} else {
 			IFID_Stall = 0;
 			IDEX_Stall = 0;
 		}
+	} else {
+		IFID_Stall = 0;
+		IDEX_Stall = 0;
 	}
+	if (cycle == 3) printf("IDEX_Stall = %d\n", IDEX_Stall);
 }
 
+//======================================================== inline void controller() =========
 inline void controller() {
 	// IDEX_ExtOp = ; ?????
 	//=============================== IDEX_ALUSrc ===============================
@@ -646,7 +834,7 @@ inline void decoder() {
 	opcode = scan_command(31,26);
 	r2521  = scan_command(25,21);
 	r2016  = scan_command(20,16);
-	r1511  = scan_command(25,11);
+	r1511  = scan_command(15,11);
 	r1006  = scan_command(10, 6);
 	r0500  = scan_command( 5, 0);
 	r2500  = scan_command(25, 0);
@@ -654,15 +842,76 @@ inline void decoder() {
 }
 
 inline void registers() {
-	if (MEMWB_RegWr) {
-		regi[MEMWB_Register_WB_Number] = write_back;
+	// printf("cycle %d in registers(), MEMWB_Register_WB_NumberN = %d\n", cycle, MEMWB_Register_WB_NumberN);
+	// if (cycle == 5) {
+		// printf("cycle %d in registers(), input data = 0x%08X\n", cycle, write_backN);
+	// }
+	
+	if (registers_tmp1) {
+		if (registers_tmp2 == 0 && registers_tmp4 != "NOP") {
+			errorflag_write0 = true;
+		} else {
+			// printf("cycle %d in registers(), input data = 0x%08X\n", cycle, registers_tmp2);
+			regi[registers_tmp2] = registers_tmp3;
+		}
 	}
 	IDEX_Register_Result[0] = regi[r2521];
 	IDEX_Register_Result[1] = regi[r2016];
 	reg_output_equal = (IDEX_Register_Result[0] == IDEX_Register_Result[1]);
+	registers_tmp1 = MEMWB_RegWrB;
+	registers_tmp2 = MEMWB_Register_WB_NumberN;
+	registers_tmp3 = write_back;
+	registers_tmp4 = WB_State;
 }
 
 inline int scan_command(int start, int end) {
     unsigned int b=0xFFFFFFFF;
     return (command>>end)&(b>>(end+31-start));
+}
+
+inline void set_state() {
+	switch(opcode) {
+		case 0: // R type instruction
+			switch(r0500) {
+				case ADD: 	IF_State = "ADD"; 	break;
+				case ADDU: 	IF_State = "ADDU"; 	break;
+				case SUB: 	IF_State = "SUB"; 	break;
+				case AND: 	IF_State = "AND"; 	break;
+				case OR: 	IF_State = "OR"; 	break;
+				case XOR: 	IF_State = "XOR"; 	break;
+				case NOR: 	IF_State = "NOR"; 	break;
+				case NAND: 	IF_State = "NAND"; 	break;
+				case SLT: 	IF_State = "SLT"; 	break;
+				case SLL: 	IF_State = "SLL"; 	break;
+				case SRL: 	IF_State = "SRL"; 	break;
+				case SRA: 	IF_State = "SRA"; 	break;
+				case JR: 	IF_State = "JR"; 	break;
+				case MULT: 	IF_State = "MULT"; 	break;
+				case MULTU:	IF_State = "MULTU";	break;
+				case MFHI: 	IF_State = "MFHI"; 	break;
+				case MFLO: 	IF_State = "MFLO"; 	break;
+			}
+			break;
+		case ADDI: 	IF_State = "ADDI"; 	break;
+		case ADDIU: IF_State = "ADDIU"; break;
+		case LW: 	IF_State = "LW"; 	break;
+		case LH: 	IF_State = "LH"; 	break;
+		case LHU: 	IF_State = "LHU"; 	break;
+		case LB: 	IF_State = "LB"; 	break;
+		case LBU: 	IF_State = "LBU"; 	break;
+		case SW: 	IF_State = "SW"; 	break;
+		case SH: 	IF_State = "SH"; 	break;
+		case SB: 	IF_State = "SB"; 	break;
+		case LUI: 	IF_State = "LUI"; 	break;
+		case ANDI: 	IF_State = "ANDI"; 	break;
+		case ORI: 	IF_State = "ORI"; 	break;
+		case NORI: 	IF_State = "NORI"; 	break;
+		case SLTI: 	IF_State = "SLTI"; 	break;
+		case BEQ: 	IF_State = "BEQ"; 	break;
+		case BNE: 	IF_State = "BNE"; 	break;
+		case BGTZ: 	IF_State = "BGTZ"; 	break;
+		case J: 	IF_State = "J"; 	break;
+		case JAL: 	IF_State = "JAL"; 	break;
+		case HALT: 	IF_State = "HALT"; 	break;
+	}
 }

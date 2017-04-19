@@ -1,5 +1,7 @@
 #!/bin/bash
 
+x=''
+
 cd simulator
 make
 if [ $? != 0 ]; then
@@ -25,6 +27,9 @@ do
         echo "snapshot.rpt done!"
     else
         echo "some difference in snapshot.rpt!"
+        echo "Press enter to see more details"
+        read x
+        vimdiff snapshot.rpt snapshotTA.rpt
         exit 1
     fi
 
@@ -33,6 +38,9 @@ do
         echo "error_dump.rpt done!"
     else
         echo "some difference in error_dump.rpt!"
+        echo "Press enter to see more details"
+        read x
+        vimdiff error_dump.rpt error_dumpTA.rpt
         exit 1
     fi
 done
