@@ -330,16 +330,17 @@ inline void read_data() {
 	}
 	
 	// read dimage.bin
-	fread(buff, sizeofchar, 4, dimage); // read initial SP address
+	tmp = fread(buff, sizeofchar, 4, dimage); // read initial SP address
+    if (tmp == 0) printf("Read ERROR!\n");
 	regi[29] = regi2[29] =  (((unsigned char)buff[0])<<24)|(((unsigned char)buff[1])<<16)|(((unsigned char)buff[2])<<8)|(((unsigned char)buff[3]));
-	fread(buff, sizeofchar, 4, dimage); // read total number of data
+	tmp = fread(buff, sizeofchar, 4, dimage); // read total number of data
 	data_size = (((unsigned char)buff[0])<<24)|(((unsigned char)buff[1])<<16)|(((unsigned char)buff[2])<<8)|(((unsigned char)buff[3]));
-	fread(memd, sizeofchar, data_size * 4, dimage);
+	tmp = fread(memd, sizeofchar, data_size * 4, dimage);
 	
 	// read iimage.bin
-	fread(buff, sizeofchar, 4, iimage); // read initial PC address
+	tmp = fread(buff, sizeofchar, 4, iimage); // read initial PC address
 	PC = (((unsigned char)buff[0])<<24)|(((unsigned char)buff[1])<<16)|(((unsigned char)buff[2])<<8)|(((unsigned char)buff[3]));
-	fread(buff, sizeofchar, 4, iimage); // read total instruction number
+	tmp = fread(buff, sizeofchar, 4, iimage); // read total instruction number
 	data_size = (((unsigned char)buff[0])<<24)|(((unsigned char)buff[1])<<16)|(((unsigned char)buff[2])<<8)|(((unsigned char)buff[3]));
 	for (int i = PC/4; fread(buff, sizeofchar, 4, iimage); i++) {
 		memi[i] = (((unsigned char)buff[0])<<24)|(((unsigned char)buff[1])<<16)|(((unsigned char)buff[2])<<8)|(((unsigned char)buff[3]));
