@@ -9,10 +9,8 @@ int main() {
 		
 		decoder();
 		
-		// log_command();
 		if (opcode == HALT) {
 			finalize(0);
-			break;
 		} else if ((command & 0xfc1fffff) == 0) {
 			PC += 4;
 			print_diff();
@@ -309,13 +307,8 @@ inline void control() {
 inline void init() {
 	fout = fopen("snapshot.rpt", "wb");
 	ferr = fopen("error_dump.rpt", "wb");
-	if (!fout) {
-		printf("snapshot.rpt cannot be opened!\n");
-	}
-	if (!ferr) {
-		printf("error_dump.rpt cannot be opened!\n");
-	}
-	
+	if (!fout) printf("snapshot.rpt cannot be opened!\n");
+	if (!ferr) printf("error_dump.rpt cannot be opened!\n");
 	read_data();
 }
 
@@ -341,7 +334,6 @@ inline void read_data() {
 	regi[29] = regi2[29] =  (((unsigned char)buff[0])<<24)|(((unsigned char)buff[1])<<16)|(((unsigned char)buff[2])<<8)|(((unsigned char)buff[3]));
 	fread(buff, sizeofchar, 4, dimage); // read total number of data
 	data_size = (((unsigned char)buff[0])<<24)|(((unsigned char)buff[1])<<16)|(((unsigned char)buff[2])<<8)|(((unsigned char)buff[3]));
-	
 	fread(memd, sizeofchar, data_size * 4, dimage);
 	
 	// read iimage.bin
@@ -380,28 +372,7 @@ inline void print_diff() {
     	oprintf("$LO: 0x%08X\n", LO);
     	LO2 = LO;
     }
-
     oprintf("PC: 0x%08X\n\n\n", PC);
-    
-    {
-    	// printf("cycle %d\n", cycle);
-	    // for (int i = 0; i < 32; i++) {
-	    // 	if (regi[i] != regi2[i]) {
-	    // 		printf("$%02d: 0x%08X\n", i, regi[i]);
-	    // 		regi2[i] = regi[i];
-	    // 	}
-	    // }
-	    // if (HI != HI2) {
-	    // 	printf("$HI: 0x%08X\n", HI);
-	    // 	HI2 = HI;
-	    // }
-	    // if (LO != LO2) {
-	    // 	printf("$LO: 0x%08X\n", LO);
-	    // 	LO2 = LO;
-	    // }
-
-	    // printf("PC: 0x%08X\n\n\n", PC);	
-    }
 }
 
 inline void print_error() {
