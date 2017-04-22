@@ -33,9 +33,11 @@ int main() {
 	return 0;
 }
 
+// input: PC, cmp, opcode, r2500, extend_result, regi[r2521]<=use other method to get
+// output: PC(Next cycle)
 inline void PC_control() {
-	int NPC = PC + 4;
-	int BPC = NPC + (extend_result << 2);
+	int NPC = PC + 4; // Next PC
+	int BPC = NPC + (extend_result << 2); // Branch PC
 	if (cmp) {
 		PC = BPC;
 	} else if (opcode == J) {
@@ -50,6 +52,9 @@ inline void PC_control() {
 	}
 }
 
+// input: RegDst, RegWrite, MemRead, regi_input, DM_result, ALU_result, opcode, 
+//        r2016, r1511, r0500, moveflag_HI, moveflag_LO, HI, LO
+// output: NONE
 inline void regi_write() {
 	regi_input = (RegDst) ? r2016 : r1511;
 	if (RegWrite) {
@@ -69,6 +74,8 @@ inline void regi_write() {
 	}
 }
 
+// input: MemRead, ALU_result, regi_output2
+// output: DM_result
 inline void data_memory() {
 	if (MemRead == 111) {
 		if (ALU_result < 1024 && ALU_result >= 0)
@@ -127,6 +134,8 @@ inline void data_memory() {
 	}
 }
 
+// input: regi_output1, regi_output2, ALUSrc, extend_result, ALUOp, opcode, r1006
+// output: ALU_result, cmp, HI, LO
 inline void ALU() {
 	ALU_input1 = regi_output1;
 	ALU_input2 = ALUSrc ? extend_result : regi_output2;
@@ -213,6 +222,8 @@ inline void ALU() {
 	else 												cmp = 0;
 }
 
+// input: opcode, r1500, r0500
+// output: extend_result
 inline void sign_extend() {
 	if (opcode == ANDI || opcode == ORI || opcode == NORI) {
 		extend_result = r1500;
@@ -223,11 +234,15 @@ inline void sign_extend() {
 	}
 }
 
+// input: r2521, r2016
+// output: regi_output1, regi_output2
 inline void regi_read() {
 	regi_output1 = regi[r2521];
 	regi_output2 = regi[r2016];
 }
 
+// input: command
+// output: opcode, r2521, r2016, t1511, r1006, r2500, r1500, r0500
 inline void decoder() {
 	opcode = scan_command(31, 26);
 	r2521  = scan_command(25, 21);
@@ -239,71 +254,169 @@ inline void decoder() {
 	r0500  = scan_command( 5,  0);
 }
 
+// input: opcode, r0500
+// output: RegDst, RegWrite, MemtoReg, ALUSrc, ALUOp, MemRead, MemWrite
 inline void control() {
-	RegDst = opcode; // if R type, opcode == 0; else opcode == 1
-	switch(opcode) {
-		case LW:  MemRead = 114; MemWrite =   0; break;
-		case LH:  MemRead = 112; MemWrite =   0; break;
-		case LHU: MemRead = 122; MemWrite =   0; break;
-		case LB:  MemRead = 111; MemWrite =   0; break;
-		case LBU: MemRead = 121; MemWrite =   0; break;
-		case SW:  MemRead =   0; MemWrite = 214; break;
-		case SH:  MemRead =   0; MemWrite = 212; break;
-		case SB:  MemRead =   0; MemWrite = 211; break;
-		default:  MemRead =   0; MemWrite =   0; break;
-	}
-	RegWrite = ((opcode == 0 && (r0500 == ADD || r0500 == ADDU || r0500 == SUB || r0500 == AND ||
-	            r0500 == OR || r0500 == NOR || r0500 == XOR || r0500 == NAND || r0500 == SLT ||
-	            r0500 == SLL || r0500 == SRL || r0500 == SRA || r0500 == MFHI || r0500 == MFLO)) ||
-	            opcode == ADDI || opcode == ADDIU || MemRead || opcode == LUI || opcode == ANDI || 
-	            opcode == ORI || opcode == NORI || opcode == SLTI);
+	RegDst   = opcode; // if R type, opcode == 0; else opcode == 1
+	ALUSrc   = (opcode != BNE && opcode != BEQ && opcode != BGTZ && opcode);
 	MemtoReg = MemRead;
-	ALUSrc = (opcode != BNE && opcode != BEQ && opcode != BGTZ && opcode);
+	MemRead  =       0; 
+	MemWrite =       0;
+	RegWrite =       0;
 	switch(opcode) {
 		case 0:
 			switch(r0500) {
-				case ADD: 	ALUOp = ADD; 	break;
-				case ADDU: 	ALUOp = ADDU; 	break;
-				case SUB: 	ALUOp = SUB; 	break;
-				case AND: 	ALUOp = AND; 	break;
-				case OR: 	ALUOp = OR; 	break;
-				case XOR: 	ALUOp = XOR; 	break;
-				case NOR: 	ALUOp = NOR; 	break;
-				case NAND: 	ALUOp = NAND; 	break;
-				case SLT: 	ALUOp = COMP; 	break;
-				case SLL: 	ALUOp = SLL; 	break;
-				case SRL: 	ALUOp = SRL; 	break;
-				case SRA: 	ALUOp = SRA; 	break;
-				case JR: 	ALUOp = NONE; 	break;
-				case MULT: 	ALUOp = MULT; 	break;
-				case MULTU: ALUOp = MULTU; 	break;
-				case MFHI: 	ALUOp = NONE; 	break;
-				case MFLO: 	ALUOp = NONE; 	break;
+				case ADD: 	
+					ALUOp    = ADD; 	
+					RegWrite = 1;
+					break;
+				case ADDU: 	
+					ALUOp    = ADDU;
+					RegWrite = 1; 	
+					break;
+				case SUB: 	
+					ALUOp    = SUB; 
+					RegWrite = 1;	
+					break;
+				case AND: 	
+					ALUOp    = AND; 
+					RegWrite = 1;	
+					break;
+				case OR: 	
+					ALUOp    = OR; 
+					RegWrite = 1;	
+					break;
+				case XOR: 	
+					ALUOp    = XOR; 
+					RegWrite = 1;	
+					break;
+				case NOR: 	
+					ALUOp    = NOR; 
+					RegWrite = 1;	
+					break;
+				case NAND: 	
+					ALUOp    = NAND;
+					RegWrite = 1; 	
+					break;
+				case SLT: 	
+					ALUOp    = COMP;
+					RegWrite = 1; 	
+					break;
+				case SLL: 	
+					ALUOp    = SLL; 
+					RegWrite = 1;	
+					break;
+				case SRL: 	
+					ALUOp    = SRL; 
+					RegWrite = 1;	
+					break;
+				case SRA: 	
+					ALUOp    = SRA; 
+					RegWrite = 1;	
+					break;
+				case JR: 	
+					ALUOp    = NONE;
+					break;
+				case MULT: 	
+					ALUOp    = MULT;
+					break;
+				case MULTU: 
+					ALUOp    = MULTU; 	
+					break;
+				case MFHI: 	
+					ALUOp    = NONE; 	
+					RegWrite = 1;
+					break;
+				case MFLO: 	
+					ALUOp    = NONE;
+					RegWrite = 1; 	
+					break;
 			}
 			break;
-		case ADDI: 	ALUOp = ADD; 	break;
-		case ADDIU: ALUOp = ADDU; 	break;
-		case LW: 	ALUOp = ADD; 	break;
-		case LH: 	ALUOp = ADD; 	break;
-		case LHU: 	ALUOp = ADD; 	break;
-		case LB: 	ALUOp = ADD; 	break;
-		case LBU: 	ALUOp = ADD; 	break;
-		case SW: 	ALUOp = ADD; 	break;
-		case SH: 	ALUOp = ADD; 	break;
-		case SB: 	ALUOp = ADD; 	break;
-		case LUI: 	ALUOp = LUI; 	break;
-		case ANDI: 	ALUOp = AND; 	break;
-		case ORI: 	ALUOp = OR; 	break;
-		case NORI: 	ALUOp = NOR; 	break;
-		case SLTI: 	ALUOp = COMP; 	break;
-		case BEQ: 	ALUOp = NONE; 	break;
-		case BNE: 	ALUOp = NONE; 	break;
-		case BGTZ: 	ALUOp = NONE; 	break;
-		case J:     ALUOp = NONE; 	break;
-		case JAL:   ALUOp = NONE; 	break;
+		case ADDI: 	
+			ALUOp    = ADD; 	
+			RegWrite = 1;
+			break;
+		case ADDIU: 
+			ALUOp    = ADDU;
+			RegWrite = 1; 	
+			break;
+		case LW: 	
+			ALUOp    = ADD; 
+			RegWrite =   1;	
+			MemRead  = 114; 
+			break;
+		case LH: 	
+			ALUOp    = ADD; 
+			RegWrite =   1;	
+			MemRead  = 112; 
+			break;
+		case LHU: 	
+			ALUOp    = ADD; 
+			RegWrite =   1;	
+			MemRead  = 122; 
+			break;
+		case LB: 	
+			ALUOp    = ADD; 
+			RegWrite =   1;	
+			MemRead  = 111;
+			break;
+		case LBU: 	
+			ALUOp    = ADD; 
+			RegWrite =   1;	
+			MemRead  = 121;
+			break;
+		case SW: 	
+			ALUOp    = ADD; 
+			MemWrite = 214;
+			break;
+		case SH: 	
+			ALUOp    = ADD;
+			MemWrite = 212;
+			break;
+		case SB: 	
+			ALUOp    = ADD;
+			MemWrite = 211;
+			break;
+		case LUI: 	
+			ALUOp    = LUI;
+			RegWrite = 1; 	
+			break;
+		case ANDI: 	
+			ALUOp    = AND; 
+			RegWrite = 1;	
+			break;
+		case ORI: 	
+			ALUOp    = OR; 
+			RegWrite = 1;	
+			break;
+		case NORI:  	
+			ALUOp    = NOR; 
+			RegWrite = 1;
+			break;
+		case SLTI: 	
+			ALUOp    = COMP; 	
+			RegWrite = 1;
+			break;
+		case BEQ: 	
+			ALUOp    = NONE; 	
+			break;
+		case BNE: 	
+			ALUOp    = NONE;
+			break;
+		case BGTZ: 	
+			ALUOp    = NONE;
+			break;
+		case J:     
+			ALUOp    = NONE;
+			break;
+		case JAL:   
+			ALUOp    = NONE;
+			break;
 	}
 }
 
+// global variable: fout, ferr
 inline void init() {
 	fout = fopen("snapshot.rpt", "wb");
 	ferr = fopen("error_dump.rpt", "wb");
@@ -312,6 +425,7 @@ inline void init() {
 	read_data();
 }
 
+// output: regi[], memi[], memd[], PC
 inline void read_data() {
 	char buff[4];
 	int sizeofchar = sizeof(char);
@@ -347,6 +461,7 @@ inline void read_data() {
 	}
 }
 
+// input: regi[]. HI, LO, PC
 inline void print_all() {
     oprintf("cycle 0\n");
     for (int i = 0; i < 32; i++) {
@@ -357,6 +472,7 @@ inline void print_all() {
     oprintf("PC: 0x%08X\n\n\n", PC);
 }
 
+// input: regi[]. HI, LO, PC
 inline void print_diff() {
 	oprintf("cycle %d\n", cycle);
     for (int i = 0; i < 32; i++) {
@@ -376,6 +492,8 @@ inline void print_diff() {
     oprintf("PC: 0x%08X\n\n\n", PC);
 }
 
+// global: errorflag_write0, errorflag_overflow, errorflag_overwrite, 
+//         errorflag_memoryOverflow, errorflag_missingAlign
 inline void print_error() {
 	if (errorflag_write0) {
 		eprintf("In cycle %d: Write $0 Error\n", cycle);
