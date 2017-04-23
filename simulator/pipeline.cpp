@@ -1,428 +1,95 @@
 #include "define.hpp"
+#include "IF.hpp"
+#include "ID.hpp"
+#include "EX.hpp"
+#include "DM.hpp"
+#include "WB.hpp"
+
+inline void log_command();
+
+// pipeline buffer
+bufr ifid, ifidn, ifid0;
+bufr idex, idexn, idex0;
+bufr exdm, exdmn, exdm0;
+bufr dmwb, dmwbn, dmwb0;
+
+FILE *fout, *ferr;
+int regi[32];
+int memi[256];
+char memd[1024];
+int total_ins;
+int PC;
+int HI;
+int LO;
+int cycle;
+int regi2[32];
+int PC2;
+int HI2;
+int LO2;
+int command;
+int mem_limit;
+int PC_offset;
+int PC_limit;
+int SP_offset;
+bool flush;
+int stall;
+
+bool IDexdmf = false;
+bool IDdmwbf = false;
+int  IDrsf   = 0;
+int  IDrtf   = 0;
+bool EXexdmf = false;
+bool EXdmwbf = false;
+int  EXrsf   = 0;
+int  EXrtf   = 0;
+
+bool moveflag_HI = false;
+bool moveflag_LO = false;
+bool errorflag_write0 = false;
+bool errorflag_overflow = false;
+bool errorflag_overwrite = false;
+bool errorflag_memoryOverflow = false;
+bool errorflag_missingAlign = false;
 
 int main() {
 	init();
+	IF();
+	ifidn = ifid;
 	print_all();
 	do {
 		cycle += 1;
-		command = memi[PC / 4];
-		
-		decoder();
-		
-		if (opcode == HALT) {
+		ID();
+		IF();
+		if (ifidn.halt && idexn.halt && exdmn.halt && dmwbn.halt) {
 			finalize(0);
-		} else if ((command & 0xfc1fffff) == 0) {
-			PC += 4;
-			print_diff();
-			continue;
 		}
-		control();
-		regi_read();
-		sign_extend();
-		ALU();
-		data_memory();
-		regi_write();
-		PC_control();
-		
-		print_error();
+		log_command();
+		EX();
+		DM();
 		print_diff();
+		WB();
+		print_error();
+		// register move forward
+		if (stall) {
+			idexn = idex0;
+			exdmn = exdm;
+			dmwbn = dmwb;
+		} else if (flush) {
+			ifidn = ifid0;
+			idexn = idex;
+			exdmn = exdm;
+			dmwbn = dmwb;
+		} else {
+			ifidn = ifid;
+			idexn = idex;
+			exdmn = exdm;
+			dmwbn = dmwb;
+		}
 		
-		if (cycle%500000==0){printf("In cycle %d, Press Enter to continue...\n", cycle);getchar();}
+		if(cycle%500000==0){printf("In cycle %d, Press Enter to continue...\n", cycle);getchar();}
 	} while (true);
 	finalize(0);
 	return 0;
-}
-
-// input: PC, cmp, opcode, r2500, extend_result, regi[r2521]<=use other method to get
-// output: PC(Next cycle)
-inline void PC_control() {
-	int NPC = PC + 4; // Next PC
-	int BPC = NPC + (extend_result << 2); // Branch PC
-	if (cmp) {
-		PC = BPC;
-	} else if (opcode == J) {
-		PC = ((NPC & 0xf0000000)|(r2500 << 2));
-	} else if (opcode == JAL) {
-		PC = ((NPC & 0xf0000000)|(r2500 << 2));
-		regi[31] = NPC;
-	} else if (opcode == 0 && r0500 == JR) {
-		PC = regi[r2521];
-	} else {
-		PC = NPC;
-	}
-}
-
-// input: RegDst, RegWrite, MemRead, regi_input, DM_result, ALU_result, opcode, 
-//        r2016, r1511, r0500, moveflag_HI, moveflag_LO, HI, LO
-// output: NONE
-inline void regi_write() {
-	regi_input = (RegDst) ? r2016 : r1511;
-	if (RegWrite) {
-		regi[regi_input] = (MemRead) ? DM_result : ALU_result;
-		if (opcode == 0 && r0500 == MFHI) {
-			regi[regi_input] = HI;
-			moveflag_HI = true;
-		}
-		if (opcode == 0 && r0500 == MFLO) {
-			regi[regi_input] = LO;
-			moveflag_LO = true;
-		}
-		if (regi_input == 0) {
-			errorflag_write0 = true;
-			regi[0] = 0;
-		}
-	}
-}
-
-// input: MemRead, ALU_result, regi_output2
-// output: DM_result
-inline void data_memory() {
-	if (MemRead == 111) {
-		if (ALU_result < 1024 && ALU_result >= 0)
-			DM_result = memd2reg1(ALU_result);
-		else 
-			errorflag_memoryOverflow = true;
-	} else if (MemRead == 112) {
-		if (ALU_result %2 != 0) errorflag_missingAlign = true;
-		if (ALU_result < 1023 && ALU_result >= 0) 
-			DM_result = memd2reg2(ALU_result);
-		else
-			errorflag_memoryOverflow = true;
-	} else if (MemRead == 114) {
-		if (ALU_result %4 != 0) errorflag_missingAlign = true;
-		if (ALU_result < 1021 &&ALU_result >= 0)
-			DM_result = memd2reg4(ALU_result);
-		else
-			errorflag_memoryOverflow = true;
-	} else if (MemRead == 121) {
-		if (ALU_result < 1024 && ALU_result >= 0)
-			DM_result = memd2reg1(ALU_result) & 0x000000ff;
-		else
-			errorflag_memoryOverflow = true;
-	} else if (MemRead == 122) {
-		if (ALU_result %2 != 0) errorflag_missingAlign = true;
-		if (ALU_result < 1023 && ALU_result >= 0)
-			DM_result = memd2reg2(ALU_result) & 0x0000ffff;
-		else
-			errorflag_memoryOverflow = true;
-	} else {
-		DM_result = 0;
-	}
-	if (MemWrite == 211) {
-		if (ALU_result < 1024 && ALU_result >= 0)
-			memd[ALU_result]   =  regi_output2      & 0x000000ff;
-		else
-			errorflag_memoryOverflow = true;
-	} else if (MemWrite == 212) {
-		if (ALU_result %2 != 0) errorflag_missingAlign = true;
-		if (ALU_result < 1023 && ALU_result >= 0) {
-			memd[ALU_result  ] = (regi_output2>> 8) & 0x000000ff;
-			memd[ALU_result+1] = (regi_output2    ) & 0x000000ff;
-		} else {
-			errorflag_memoryOverflow = true;
-		}
-	} else if (MemWrite == 214) {
-		if (ALU_result %4 != 0) errorflag_missingAlign = true;
-		if (ALU_result < 1021 && ALU_result >= 0) {
-			memd[ALU_result  ] = (regi_output2>>24) & 0x000000ff;
-			memd[ALU_result+1] = (regi_output2>>16) & 0x000000ff;
-			memd[ALU_result+2] = (regi_output2>>8 ) & 0x000000ff;
-			memd[ALU_result+3] = (regi_output2    ) & 0x000000ff;
-		} else {
-			errorflag_memoryOverflow = true;
-		}
-	}
-}
-
-// input: regi_output1, regi_output2, ALUSrc, extend_result, ALUOp, opcode, r1006
-// output: ALU_result, cmp, HI, LO
-inline void ALU() {
-	ALU_input1 = regi_output1;
-	ALU_input2 = ALUSrc ? extend_result : regi_output2;
-	long long tmp;
-	switch (ALUOp) {
-		case ADD:
-			ALU_result = ALU_input1 + ALU_input2;
-			if ((ALU_result >= 0 && ALU_input1 <  0 && ALU_input2 <  0) || 
-			    (ALU_result <  0 && ALU_input1 >= 0 && ALU_input2 >= 0)) {
-				errorflag_overflow = true;
-			}
-			break;
-		case ADDU:
-			ALU_result = ALU_input1 + ALU_input2;
-			break;
-		case SUB:
-			ALU_input2 = ~ALU_input2 + 1;
-			ALU_result = ALU_input1 + ALU_input2;
-			if ((ALU_result >= 0 && ALU_input1 <  0 && ALU_input2 <  0) || 
-			    (ALU_result <  0 && ALU_input1 >= 0 && ALU_input2 >= 0)) {
-				errorflag_overflow = true;
-			}
-			break;
-		case MULT:
-			if (!(moveflag_HI || moveflag_LO)) {
-				errorflag_overwrite = true;
-			}
-			moveflag_HI = moveflag_LO = false;
-			tmp = (long long)ALU_input1 * (long long)ALU_input2;
-			HI = tmp >> 32;
-			LO = tmp & 0x00000000ffffffff;
-			break;
-		case MULTU:
-			if (!(moveflag_HI || moveflag_LO)) {
-				errorflag_overwrite = true;
-			}
-			moveflag_HI = moveflag_LO = false;
-			tmp = (long long)((unsigned int)ALU_input1) * 
-				  (long long)((unsigned int)ALU_input2);
-			HI = tmp >> 32;
-			LO = tmp & 0x00000000ffffffff;
-			break;
-		case AND:
-			ALU_result = ALU_input1 & ALU_input2;
-			break;
-		case OR:
-			ALU_result = ALU_input1 | ALU_input2;
-			break;
-		case NAND:
-			ALU_result = ~(ALU_input1 & ALU_input2);
-			break;
-		case NOR:
-			ALU_result = ~(ALU_input1 | ALU_input2);
-			break;
-		case XOR:
-			ALU_result = ALU_input1 ^ ALU_input2;
-			break;
-		case SLL:
-			ALU_result = ALU_input2 << r1006;
-			break;
-		case SRL:
-			ALU_result = (unsigned int)ALU_input2 >> r1006;
-			break;
-		case SRA:
-			ALU_result = ALU_input2 >> r1006;
-			break;
-		case LUI:
-			ALU_result = ALU_input2 << 16;
-			break;
-		case COMP:
-			ALU_result = ALU_input1 < ALU_input2;
-			break;
-		case NONE:
-			ALU_result = 0;
-			break;
-		default:
-			printf("<<< ERROR! invalid ALUOp\n");
-			break;
-	}
-	
-	if (opcode == BEQ && ALU_input1 == ALU_input2) 		cmp = 1;
-	else if (opcode == BNE && ALU_input1 != ALU_input2) cmp = 1;
-	else if (opcode == BGTZ && ALU_input1 > 0) 			cmp = 1;
-	else 												cmp = 0;
-}
-
-// input: opcode, r1500, r0500
-// output: extend_result
-inline void sign_extend() {
-	if (opcode == ANDI || opcode == ORI || opcode == NORI) {
-		extend_result = r1500;
-	} else if (opcode) { // extend r1500 to 32 bit
-		extend_result = (r1500 >= 32768) ? (0xffff0000 | r1500) : r1500;
-	} else {             // extend r0500 to 32 bit but unsigned 
-		extend_result = r0500;
-	}
-}
-
-// input: r2521, r2016
-// output: regi_output1, regi_output2
-inline void regi_read() {
-	regi_output1 = regi[r2521];
-	regi_output2 = regi[r2016];
-}
-
-// input: command
-// output: opcode, r2521, r2016, t1511, r1006, r2500, r1500, r0500
-inline void decoder() {
-	opcode = scan_command(31, 26);
-	r2521  = scan_command(25, 21);
-	r2016  = scan_command(20, 16);
-	r1511  = scan_command(15, 11);
-	r1006  = scan_command(10,  6);
-	r2500  = scan_command(25,  0);
-	r1500  = scan_command(15,  0);
-	r0500  = scan_command( 5,  0);
-}
-
-// input: opcode, r0500
-// output: RegDst, RegWrite, MemtoReg, ALUSrc, ALUOp, MemRead, MemWrite
-inline void control() {
-	RegDst   = opcode; // if R type, opcode == 0; else opcode == 1
-	ALUSrc   = (opcode != BNE && opcode != BEQ && opcode != BGTZ && opcode);
-	MemtoReg = MemRead;
-	MemRead  =       0; 
-	MemWrite =       0;
-	RegWrite =       0;
-	switch(opcode) {
-		case 0:
-			switch(r0500) {
-				case ADD: 	
-					ALUOp    = ADD; 	
-					RegWrite = 1;
-					break;
-				case ADDU: 	
-					ALUOp    = ADDU;
-					RegWrite = 1; 	
-					break;
-				case SUB: 	
-					ALUOp    = SUB; 
-					RegWrite = 1;	
-					break;
-				case AND: 	
-					ALUOp    = AND; 
-					RegWrite = 1;	
-					break;
-				case OR: 	
-					ALUOp    = OR; 
-					RegWrite = 1;	
-					break;
-				case XOR: 	
-					ALUOp    = XOR; 
-					RegWrite = 1;	
-					break;
-				case NOR: 	
-					ALUOp    = NOR; 
-					RegWrite = 1;	
-					break;
-				case NAND: 	
-					ALUOp    = NAND;
-					RegWrite = 1; 	
-					break;
-				case SLT: 	
-					ALUOp    = COMP;
-					RegWrite = 1; 	
-					break;
-				case SLL: 	
-					ALUOp    = SLL; 
-					RegWrite = 1;	
-					break;
-				case SRL: 	
-					ALUOp    = SRL; 
-					RegWrite = 1;	
-					break;
-				case SRA: 	
-					ALUOp    = SRA; 
-					RegWrite = 1;	
-					break;
-				case JR: 	
-					ALUOp    = NONE;
-					break;
-				case MULT: 	
-					ALUOp    = MULT;
-					break;
-				case MULTU: 
-					ALUOp    = MULTU; 	
-					break;
-				case MFHI: 	
-					ALUOp    = NONE; 	
-					RegWrite = 1;
-					break;
-				case MFLO: 	
-					ALUOp    = NONE;
-					RegWrite = 1; 	
-					break;
-			}
-			break;
-		case ADDI: 	
-			ALUOp    = ADD; 	
-			RegWrite = 1;
-			break;
-		case ADDIU: 
-			ALUOp    = ADDU;
-			RegWrite = 1; 	
-			break;
-		case LW: 	
-			ALUOp    = ADD; 
-			RegWrite =   1;	
-			MemRead  = 114; 
-			break;
-		case LH: 	
-			ALUOp    = ADD; 
-			RegWrite =   1;	
-			MemRead  = 112; 
-			break;
-		case LHU: 	
-			ALUOp    = ADD; 
-			RegWrite =   1;	
-			MemRead  = 122; 
-			break;
-		case LB: 	
-			ALUOp    = ADD; 
-			RegWrite =   1;	
-			MemRead  = 111;
-			break;
-		case LBU: 	
-			ALUOp    = ADD; 
-			RegWrite =   1;	
-			MemRead  = 121;
-			break;
-		case SW: 	
-			ALUOp    = ADD; 
-			MemWrite = 214;
-			break;
-		case SH: 	
-			ALUOp    = ADD;
-			MemWrite = 212;
-			break;
-		case SB: 	
-			ALUOp    = ADD;
-			MemWrite = 211;
-			break;
-		case LUI: 	
-			ALUOp    = LUI;
-			RegWrite = 1; 	
-			break;
-		case ANDI: 	
-			ALUOp    = AND; 
-			RegWrite = 1;	
-			break;
-		case ORI: 	
-			ALUOp    = OR; 
-			RegWrite = 1;	
-			break;
-		case NORI:  	
-			ALUOp    = NOR; 
-			RegWrite = 1;
-			break;
-		case SLTI: 	
-			ALUOp    = COMP; 	
-			RegWrite = 1;
-			break;
-		case BEQ: 	
-			ALUOp    = NONE; 	
-			break;
-		case BNE: 	
-			ALUOp    = NONE;
-			break;
-		case BGTZ: 	
-			ALUOp    = NONE;
-			break;
-		case J:     
-			ALUOp    = NONE;
-			break;
-		case JAL:   
-			ALUOp    = NONE;
-			break;
-	}
-}
-
-// global variable: fout, ferr
-inline void init() {
-	fout = fopen("snapshot.rpt", "wb");
-	ferr = fopen("error_dump.rpt", "wb");
-	if (!fout) printf("snapshot.rpt cannot be opened!\n");
-	if (!ferr) printf("error_dump.rpt cannot be opened!\n");
-	read_data();
 }
 
 // output: regi[], memi[], memd[], PC
@@ -461,6 +128,15 @@ inline void read_data() {
 	}
 }
 
+// global variable: fout, ferr
+inline void init() {
+	fout = fopen("snapshot.rpt", "wb");
+	ferr = fopen("error_dump.rpt", "wb");
+	if (!fout) printf("snapshot.rpt cannot be opened!\n");
+	if (!ferr) printf("error_dump.rpt cannot be opened!\n");
+	read_data();
+}
+
 // input: regi[]. HI, LO, PC
 inline void print_all() {
     oprintf("cycle 0\n");
@@ -469,7 +145,12 @@ inline void print_all() {
     }
     oprintf("$HI: 0x%08X\n", HI);
     oprintf("$LO: 0x%08X\n", LO);
-    oprintf("PC: 0x%08X\n\n\n", PC);
+    oprintf("PC: 0x%08X\n", PC);
+    oprintf("IF: 0x%08X\n", command);
+    oprintf("ID: NOP\n");
+    oprintf("EX: NOP\n");
+    oprintf("DM: NOP\n");
+    oprintf("WB: NOP\n\n\n");
 }
 
 // input: regi[]. HI, LO, PC
@@ -489,11 +170,72 @@ inline void print_diff() {
     	oprintf("$LO: 0x%08X\n", LO);
     	LO2 = LO;
     }
-    oprintf("PC: 0x%08X\n\n\n", PC);
+    oprintf("PC: 0x%08X\n", PC);
+    
+    oprintf("IF: 0x%08X", command);
+    if (stall) {
+    	oprintf(" to_be_stalled\n");
+    } else if (flush) {
+    	oprintf(" to_be_flushed\n");
+    } else {
+    	oprintf("\n");
+    }
+    
+    oprintf("ID: %s", idex.opc.c_str());
+    if (stall) {
+    	oprintf(" to_be_stalled\n");
+    }
+    if (IDexdmf || IDdmwbf) {
+    	if (IDexdmf) {
+    		if (IDrsf) {
+    			oprintf(" fwd_EX-DM_rs_$%d", IDrsf);
+    		}
+    		if (IDrtf) {
+    			oprintf(" fwd_EX-DM_rt_$%d", IDrtf);
+    		}
+    		oprintf("HERE 1");
+    		oprintf("\n");
+    	}
+    	if (IDdmwbf) {
+    		if (IDrsf) {
+    			oprintf(" fwd_DM-WB_rs_$%d", IDrsf);
+    		}
+    		if (IDrtf) {
+    			oprintf(" fwd_DM-WB_rt_$%d", IDrtf);
+    		}
+    		oprintf("HERE 2");
+    		oprintf("\n");	
+    	}
+    } else {
+    	oprintf("\n");
+    }
+    
+    oprintf("EX: %s", idexn.opc.c_str());
+    if (EXexdmf) {
+    	if (EXrsf) {
+    		oprintf(" fwd_EX-DM_rs_$%d", EXrsf);
+    	}
+    	if (EXrtf) {
+    		oprintf(" fwd_EX-DM_rt_$%d", EXrtf);
+    	}
+    	oprintf("\n");
+    }
+    if (EXdmwbf) {
+    	if (EXrsf) {
+    		oprintf(" fwd_DM-WB_rs_$%d", EXrsf);
+    	}
+    	if (EXrtf) {
+    		oprintf(" fwd_DM-WB_rt_$%d", EXrtf);
+    	}
+    	oprintf("\n");	
+    }
+    
+    oprintf("DM: %s\n", exdmn.opc.c_str());
+    oprintf("WB: %s\n\n\n", dmwbn.opc.c_str());
 }
 
-// global: errorflag_write0, errorflag_overflow, errorflag_overwrite, 
-//         errorflag_memoryOverflow, errorflag_missingAlign
+// global variables: errorflag_write0, errorflag_overflow, errorflag_overwrite, 
+//                   errorflag_memoryOverflow, errorflag_missingAlign
 inline void print_error() {
 	if (errorflag_write0) {
 		eprintf("In cycle %d: Write $0 Error\n", cycle);
@@ -522,4 +264,99 @@ void finalize(int n) {
 	fclose(ferr);
 	fclose(fout);
 	exit(n);
+}
+
+// api
+int scan_command(int start, int end) {
+    unsigned int b=0xFFFFFFFF;
+    return (command>>end)&(b>>(end+31-start));
+}
+int memd2reg1(int start) {return memd[start];
+}
+int memd2reg2(int start) {
+	int tmp=(((unsigned char)memd[start])<<8)|((unsigned char)memd[start+1]);
+	if (tmp<0x00008000) {
+	    return tmp;
+	} else {
+	    return tmp+0xffff0000;   
+	}
+}
+int memd2reg4(int start) {
+	return ((((unsigned char)memd[start  ])<<24)|
+	        (((unsigned char)memd[start+1])<<16)|
+	        (((unsigned char)memd[start+2])<< 8)|
+	        (((unsigned char)memd[start+3])));
+}
+int memd2reg(int start, int len) {
+    int tmp;
+    if (len==1) {
+        return memd[start];
+    } else if (len==2) {
+        tmp=(((unsigned char)memd[start])<<8)|((unsigned char)memd[start+1]);
+        if (tmp<0x00008000) {
+            return tmp;
+        } else {
+            return tmp+0xffff0000;   
+        }
+    } else if (len==4) {
+        return ((((unsigned char)memd[start])<<24)|(((unsigned char)memd[start+1])<<16)|(((unsigned char)memd[start+2])<<8)|(((unsigned char)memd[start+3])));
+    } else {
+        return 0;
+    }
+}
+inline void log_command() {
+	// #define logcommand
+	
+	#ifdef logcommand
+		#define lprintf(...) fprintf(fout, __VA_ARGS__)
+	#else
+		#define lprintf printf
+		printf("\n\ncycle = %d\n", cycle);
+		printf("PC = 0x%08X\n", PC);
+	#endif
+
+	lprintf("command = 0x%08X\n", command);
+	switch(ifid.opcode) {
+		case 0:
+			switch(ifid.r0500) {
+				case ADD: 	lprintf("%s $%d, $%d, $%d\n", "add", 	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case ADDU: 	lprintf("%s $%d, $%d, $%d\n", "addu", 	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case SUB: 	lprintf("%s $%d, $%d, $%d\n", "sub", 	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case AND: 	lprintf("%s $%d, $%d, $%d\n", "and", 	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case OR: 	lprintf("%s $%d, $%d, $%d\n", "or", 	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case XOR: 	lprintf("%s $%d, $%d, $%d\n", "xor", 	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case NOR: 	lprintf("%s $%d, $%d, $%d\n", "nor", 	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case NAND: 	lprintf("%s $%d, $%d, $%d\n", "nand",	ifid.r1511, ifid.r2521, ifid.r2016); break;
+				case SLT: 	lprintf("%s $%d, $%d, $%d\n", "slt", 	ifid.r1511, ifid.r2016, ifid.r2016); break;
+				case SLL: 	lprintf("%s $%d, $%d,  %d\n", "sll", 	ifid.r1511, ifid.r2016, ifid.r1006); break;
+				case SRL: 	lprintf("%s $%d, $%d,  %d\n", "srl", 	ifid.r1511, ifid.r2016, ifid.r1006); break;
+				case SRA: 	lprintf("%s $%d, $%d,  %d\n", "sra", 	ifid.r1511, ifid.r2016, ifid.r1006); break;
+				case JR: 	lprintf("%s $%d          \n", "jr", 	ifid.r2521                        ); break;
+				case MULT: 	lprintf("%s $%d, $%d     \n", "mult", 	ifid.r2521, ifid.r2016            ); break;
+				case MULTU: lprintf("%s $%d, $%d     \n", "multu", 	ifid.r2521, ifid.r2016            ); break;
+				case MFHI: 	lprintf("%s $%d          \n", "mfhi", 	ifid.r1511                        ); break;
+				case MFLO: 	lprintf("%s $%d          \n", "mflo", 	ifid.r1511                        ); break;
+			}
+			break;
+		case ADDI: 	lprintf("%s $%d, $%d, %d\n", 	"addi", ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case ADDIU: lprintf("%s $%d, $%d, %d\n", 	"addiu",ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case LW: 	lprintf("%s $%d, $%d, %d\n", 	"lw", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case LH: 	lprintf("%s $%d, $%d, %d\n", 	"lh", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case LHU: 	lprintf("%s $%d, $%d, %d\n", 	"lhu", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case LB: 	lprintf("%s $%d, $%d, %d\n", 	"lb", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case LBU: 	lprintf("%s $%d, $%d, %d\n", 	"lbu", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case SW: 	lprintf("%s $%d, $%d, %d\n", 	"sw", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case SH: 	lprintf("%s $%d, $%d, %d\n", 	"sh", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case SB: 	lprintf("%s $%d, $%d, %d\n", 	"sb", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case LUI: 	lprintf("%s $%d,  %d    \n", 	"lui", 	ifid.r2016, ifid.r1500            ); break;
+		case ANDI: 	lprintf("%s $%d, $%d, %d\n", 	"andi", ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case ORI: 	lprintf("%s $%d, $%d, %d\n", 	"ori", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case NORI: 	lprintf("%s $%d, $%d, %d\n", 	"nori", ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case SLTI: 	lprintf("%s $%d, $%d, %d\n", 	"slti", ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case BEQ: 	lprintf("%s $%d, $%d, %d\n", 	"beq", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case BNE: 	lprintf("%s $%d, $%d, %d\n", 	"bne", 	ifid.r2016, ifid.r2521, ifid.r1500); break;
+		case BGTZ: 	lprintf("%s $%d,  %d    \n", 	"bgtz", ifid.r2521, ifid.r1500            ); break;
+		case J:     lprintf("%s             \n", 	"halt"                                    ); break;
+		case JAL:   lprintf("%s             \n", 	"halt"                                    ); break;
+	}
 }

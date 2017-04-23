@@ -1,5 +1,9 @@
 #!/bin/bash
 
+RED='\033[0;36m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
 x=''
 
 cd simulator
@@ -12,36 +16,29 @@ cd ..
 
 for a in `cat list`
 do
-    echo ">>> Testing $a ========================="
+    echo ">>> Testcase $a ......"
     cp testcase/$a/dimage.bin .
     cp testcase/$a/iimage.bin .
     cp simulator/pipeline .
-    ./p
-    mv snapshot.rpt snapshotTA.rpt
-    mv error_dump.rpt error_dumpTA.rpt
-
     ./pipeline
 
-    diff snapshot.rpt snapshotTA.rpt
-    if [ $? == 0 ]; then
-        echo "snapshot.rpt done!"
-    else
+    diff snapshot.rpt testcase/$a/snapshot.rpt
+    if [ $? != 0 ]; then
         echo "some difference in snapshot.rpt!"
         echo "Press enter to see more details"
         read x
-        vimdiff snapshot.rpt snapshotTA.rpt
+        vimdiff snapshot.rpt testcase/$a/snapshot.rpt
         exit 1
     fi
 
-    diff error_dump.rpt error_dumpTA.rpt
-    if [ $? == 0 ]; then
-        echo "error_dump.rpt done!"
-    else
+    diff error_dump.rpt testcase/$a/error_dump.rpt
+    if [ $? != 0 ]; then
         echo "some difference in error_dump.rpt!"
         echo "Press enter to see more details"
         read x
-        vimdiff error_dump.rpt error_dumpTA.rpt
+        vimdiff error_dump.rpt testcase/$a/error_dump.rpt
         exit 1
     fi
+    echo -e "......................${GREEN}PASS!${NC}"
 done
 
